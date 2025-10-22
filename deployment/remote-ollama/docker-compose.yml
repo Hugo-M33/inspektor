@@ -36,7 +36,7 @@ services:
       - -c
       - |
         echo "Waiting for Ollama service to be ready..."
-        until curl -s http://ollama:11434/api/tags > /dev/null 2>&1; do
+        until ollama list > /dev/null 2>&1; do
           echo "  Ollama not ready yet, waiting..."
           sleep 3
         done
