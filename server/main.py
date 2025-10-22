@@ -52,7 +52,7 @@ class MetadataResponse(BaseModel):
 
 class MetadataRequest(BaseModel):
     """LLM's request for additional metadata"""
-    request_id: str
+    #request_id: str
     metadata_type: str
     params: Optional[Dict[str, Any]] = {}
     reason: str  # Explanation for the user
@@ -100,7 +100,7 @@ async def process_query(request: QueryRequest):
         # Process the query with the agent
         result = await sql_agent.process_query(
             query=request.query,
-            database_id=request.database_id,
+            database_id="archipelago",
             cached_metadata=cached_metadata,
             conversation_history=request.conversation_history
         )
