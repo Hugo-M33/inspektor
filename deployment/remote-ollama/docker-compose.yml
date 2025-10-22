@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      # Only expose to localhost - nginx will proxy to it
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    # Uncomment if you have GPU support
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # Automatically pull the model on startup
+  ollama-pull-model:
+    image: ollama/ollama:latest
+    container_name: ollama-pull-model
+    depends_on:
+      - ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        echo "Waiting for Ollama service to be ready..."
+        sleep 10
+        echo "Pulling llama3.2:1b model (~1GB)..."
+        ollama pull llama3.2:1b
+        echo "Model pulled successfully! You can now use: llama3.2:1b"
+        echo ""
+        echo "To pull additional models:"
+        echo "  docker exec ollama ollama pull mistral:7b"
+    restart: "no"
+
+volumes:
+  ollama_data:
+    driver: local

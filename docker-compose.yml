@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  # Ollama service with Llama 3.2 1B (smaller, faster for development)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: inspektor-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      # Performance tuning
+      - OLLAMA_NUM_PARALLEL=4
+      - OLLAMA_MAX_LOADED_MODELS=1
+      - OLLAMA_HOST=0.0.0.0:11434
+    networks:
+      - inspektor-network
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    # Uncomment for GPU support (requires nvidia-docker)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # Model initialization service
+  # This ensures Llama 3.2 1B is pulled on first startup
+  # Much smaller and faster than Mistral 7B - perfect for development!
+  ollama-pull-model:
+    image: ollama/ollama:latest
+    container_name: inspektor-ollama-pull
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - inspektor-network
+    environment:
+      - OLLAMA_HOST=ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Checking if Llama 3.2 1B is already downloaded..."
+        if ollama list | grep -q "llama3.2:1b"; then
+          echo "✓ Llama 3.2 1B already exists"
+        else
+          echo "Pulling Llama 3.2 1B model (~1GB, much faster than Mistral 7B)..."
+          ollama pull llama3.2:1b
+          echo "✓ Llama 3.2 1B downloaded successfully"
+        fi
+        echo ""
+        echo "Note: For production, use Mistral 7B or larger models"
+        echo "To switch: Update OLLAMA_MODEL env var and re-pull model"
+    restart: "no"
+
+  # Inspektor FastAPI Server
+  inspektor-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: inspektor-server
+    ports:
+      - "8000:8000"
+    depends_on:
+      ollama:
+        condition: service_healthy
+      ollama-pull-model:
+        condition: service_completed_successfully
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=llama3.2:1b
+      - HOST=0.0.0.0
+      - PORT=8000
+    networks:
+      - inspektor-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+networks:
+  inspektor-network:
+    driver: bridge
+
+volumes:
+  ollama_data:
+    driver: local

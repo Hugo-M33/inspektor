@@ -1,0 +1,179 @@
+import { useState } from 'react';
+import type {
+  QueryResponse,
+  QueryResult,
+  DatabaseCredentials,
+} from '../types/database';
+import { processQueryImproved, sendErrorFeedbackImproved } from '../services/llm-improved';
+import { executeSqlQuery, getCredentials } from '../services/tauri';
+import { ResultsViewer } from './ResultsViewer';
+
+interface QueryInterfaceImprovedProps {
+  databaseId: string;
+  databaseName: string;
+}
+
+export function QueryInterfaceImproved({
+  databaseId,
+  databaseName,
+}: QueryInterfaceImprovedProps) {
+  const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [credentials, setCredentials] = useState<DatabaseCredentials | null>(null);
+  const [generatedSQL, setGeneratedSQL] = useState<string | null>(null);
+  const [sqlExplanation, setSqlExplanation] = useState<string | null>(null);
+  const [queryResults, setQueryResults] = useState<QueryResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Load credentials on mount
+  useState(() => {
+    getCredentials(databaseId)
+      .then(setCredentials)
+      .catch((err) => setError(`Failed to load credentials: ${err}`));
+  });
+
+  const handleSubmitQuery = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!query.trim() || !credentials) return;
+
+    setLoading(true);
+    setError(null);
+    setQueryResults(null);
+    setGeneratedSQL(null);
+
+    try {
+      // Send query to LLM agent
+      // The agent will automatically use LangChain's SQLDatabase to:
+      // 1. Cache the database schema
+      // 2. Use SQL tools to explore the schema as needed
+      // 3. Generate the final SQL query
+      // All without manual metadata approval!
+      const response = await processQueryImproved(databaseId, query, credentials);
+
+      if (response.status === 'ready' && response.sql_response) {
+        setGeneratedSQL(response.sql_response.sql);
+        setSqlExplanation(response.sql_response.explanation);
+      } else if (response.status === 'error') {
+        setError(response.error || 'Unknown error from LLM');
+      }
+    } catch (err) {
+      setError(`Failed to process query: ${err}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExecuteSQL = async () => {
+    if (!generatedSQL) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const results = await executeSqlQuery(databaseId, generatedSQL);
+      setQueryResults(results);
+    } catch (err) {
+      const errorMessage = String(err);
+      setError(errorMessage);
+
+      // Send error feedback to LLM for correction
+      if (credentials) {
+        try {
+          const response = await sendErrorFeedbackImproved(
+            databaseId,
+            generatedSQL,
+            errorMessage,
+            query,
+            credentials
+          );
+
+          if (response.status === 'ready' && response.sql_response) {
+            setGeneratedSQL(response.sql_response.sql);
+            setSqlExplanation(response.sql_response.explanation);
+            setError(
+              `Previous query failed. Here's a corrected version:\n${errorMessage}`
+            );
+          }
+        } catch (feedbackErr) {
+          console.error('Failed to send error feedback:', feedbackErr);
+        }
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleNewQuery = () => {
+    setQuery('');
+    setGeneratedSQL(null);
+    setSqlExplanation(null);
+    setQueryResults(null);
+    setError(null);
+  };
+
+  return (
+    <div className="query-interface">
+      <div className="header">
+        <h2>Query: {databaseName}</h2>
+        <p className="info-text">
+          Powered by LangChain SQL Agent with automatic schema caching
+        </p>
+      </div>
+
+      <form onSubmit={handleSubmitQuery} className="query-form">
+        <textarea
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Ask a question in natural language (e.g., 'Show me all users who signed up last month')"
+          rows={3}
+          disabled={loading || !!generatedSQL}
+        />
+        <button type="submit" disabled={loading || !!generatedSQL || !credentials}>
+          {loading ? 'Processing...' : 'Ask'}
+        </button>
+      </form>
+
+      {error && (
+        <div className="error-message">
+          <h3>Error:</h3>
+          <pre>{error}</pre>
+        </div>
+      )}
+
+      {generatedSQL && !queryResults && (
+        <div className="sql-preview">
+          <h3>Generated SQL</h3>
+          {sqlExplanation && <p className="explanation">{sqlExplanation}</p>}
+          <pre className="sql-code">{generatedSQL}</pre>
+          <div className="actions">
+            <button onClick={handleExecuteSQL} disabled={loading}>
+              {loading ? 'Executing...' : 'Execute Query'}
+            </button>
+            <button onClick={handleNewQuery} className="secondary">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {queryResults && (
+        <div className="results-section">
+          <ResultsViewer results={queryResults} sql={generatedSQL!} />
+          <button onClick={handleNewQuery} className="new-query-btn">
+            New Query
+          </button>
+        </div>
+      )}
+
+      <div className="info-panel">
+        <h4>How it works:</h4>
+        <ul>
+          <li>The LLM agent automatically explores your database schema</li>
+          <li>Schema is cached for faster subsequent queries</li>
+          <li>No manual metadata approval needed</li>
+          <li>Agent uses LangChain's SQL toolkit for intelligent querying</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
