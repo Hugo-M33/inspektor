@@ -29,12 +29,18 @@ services:
       - ollama
     volumes:
       - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
     entrypoint: /bin/sh
     command:
       - -c
       - |
         echo "Waiting for Ollama service to be ready..."
-        sleep 10
+        until curl -s http://ollama:11434/api/tags > /dev/null 2>&1; do
+          echo "  Ollama not ready yet, waiting..."
+          sleep 3
+        done
+        echo "Ollama is ready!"
         echo "Pulling llama3.2:1b model (~1GB)..."
         ollama pull llama3.2:1b
         echo "Model pulled successfully! You can now use: llama3.2:1b"
