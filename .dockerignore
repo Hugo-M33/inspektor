@@ -1,0 +1,47 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+!README.md
+DEPLOYMENT.md
+IMPROVEMENTS.md
+CONTRIBUTING.md
+DOCKER_QUICK_START.md
+
+# Client (not needed for server image)
+client/
+
+# Development files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Backups
+backups/
+
+# Docker
+docker-compose*.yml
+Dockerfile
+.dockerignore
+
+# Nginx
+nginx/
+
+# Scripts
+*.sh
+
+# Makefile
+Makefile
+
+# Environment
+.env
+.env.*
+!.env.example
