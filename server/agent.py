@@ -9,11 +9,13 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 import json
+import traceback
+import logging
 
 
 class MetadataRequest(BaseModel):
     """Model for metadata requests"""
-    metadata_type: str = Field(description="Type of metadata needed: 'tables', 'schema', or 'relationships'")
+    metadata_type: str = Field(description="Type of metadata needed: 'tables', 'schema'")
     params: Dict[str, Any] = Field(default_factory=dict, description="Additional parameters for the request")
     reason: str = Field(description="Explanation for why this metadata is needed")
 
@@ -32,10 +34,11 @@ class SQLAgent:
             ollama_base_url: Base URL for Ollama API
             model_name: Name of the LLM model to use
         """
+        print(model_name)
         self.llm = ChatOllama(
             base_url=ollama_base_url,
             model=model_name,
-            temperature=0.1,  # Lower temperature for more deterministic SQL
+            temperature=0,  # Lower temperature for more deterministic SQL
         )
 
         self.system_prompt = """You are an expert SQL query generator. Your job is to convert natural language questions into accurate SQL queries.
@@ -62,7 +65,7 @@ For metadata requests:
 {
   "status": "needs_metadata",
   "metadata_request": {
-    "metadata_type": "tables|schema|relationships",
+    "metadata_type": "tables|schema",
     "params": {},
     "reason": "explanation for the user"
   }
@@ -83,6 +86,25 @@ For errors:
   "status": "error",
   "error": "error message"
 }
+
+ABSOLUTE RULES (must follow EXACTLY):
+
+1) If you do NOT see a JSON field "tables" in the available cached_metadata, you MUST NOT generate SQL.
+   Instead return exactly the JSON object:
+   {
+     "status":"needs_metadata",
+     "metadata_request": {
+       "metadata_type": "tables",
+       "params": {},
+       "reason": "explain concisely why tables are needed"
+     }
+   }
+   No extra text, no code fences, no explanation outside this JSON.
+
+2) If you do have "tables" then inspect it. If you still lack schema for referenced tables, return metadata_type "schema" with params {"tables": ["table1", ...]}.
+
+3) Always respond with a single valid JSON object chosen from the three structures documented. Avoid using the error json at all cost, instead, require more data
+
 """
 
     async def process_query(
@@ -153,6 +175,8 @@ For errors:
                     }
 
         except Exception as e:
+            print("🔥 Exception:", repr(e))
+            traceback.print_exc()
             return {
                 "status": "error",
                 "error": f"LLM error: {str(e)}"

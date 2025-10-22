@@ -32,6 +32,7 @@ export function MetadataApproval({
       switch (metadataRequest.metadata_type) {
         case 'tables':
           const tables = await getDatabaseTables(databaseId);
+          console.log(tables)
           metadata = { tables: tables.map((t) => t.name) };
           break;
 
@@ -60,7 +61,7 @@ export function MetadataApproval({
       const response = await processQuery(databaseId, '', []);
       onApproved(response);
     } catch (error) {
-      alert(`Failed to gather metadata: ${error}`);
+      console.error(`Failed to gather metadata: ${error}`);
       onRejected();
     } finally {
       setLoading(false);

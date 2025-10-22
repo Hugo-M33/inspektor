@@ -13,7 +13,7 @@ pub async fn get_tables(
 
     let query = match creds.db_type {
         DatabaseType::Postgres => {
-            "SELECT table_name, table_schema FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY table_name"
+            "SELECT table_name::text, table_schema::text FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY table_name"
         }
         DatabaseType::MySQL => {
             "SELECT table_name, table_schema FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY table_name"
@@ -192,11 +192,11 @@ pub async fn get_relationships(
     let query = match creds.db_type {
         DatabaseType::Postgres => {
             "SELECT
-                tc.table_name,
-                kcu.column_name,
-                ccu.table_name AS foreign_table,
-                ccu.column_name AS foreign_column,
-                tc.constraint_name
+                tc.table_name::text,
+                kcu.column_name::text,
+                ccu.table_name::text AS foreign_table,
+                ccu.column_name::text AS foreign_column,
+                tc.constraint_name::text
             FROM information_schema.table_constraints AS tc
             JOIN information_schema.key_column_usage AS kcu
                 ON tc.constraint_name = kcu.constraint_name
