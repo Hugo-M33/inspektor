@@ -29,6 +29,10 @@ pub fn run() {
             db::metadata::get_database_tables,
             db::metadata::get_database_table_schema,
             db::metadata::get_database_relationships,
+            // Encryption
+            db::encryption::encrypt_connection,
+            db::encryption::decrypt_connection,
+            db::encryption::verify_connection_password,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

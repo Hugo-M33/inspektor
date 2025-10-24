@@ -53,94 +53,125 @@ pub async fn get_tables(
 
 pub async fn get_table_schema(
     database_id: &str,
-    table_name: &str,
+    table_names: &str,
     schema: Option<&str>,
     store: &CredentialStore,
-) -> Result<TableSchema, DatabaseError> {
+) -> Result<Vec<TableSchema>, DatabaseError> {
     let creds = store.get(database_id)?;
     let pool = create_pool(&creds).await?;
 
-    let query = match creds.db_type {
-        DatabaseType::Postgres => {
-            format!(
-                "SELECT
-                    c.column_name,
-                    c.data_type,
-                    c.is_nullable,
-                    c.column_default,
-                    CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_primary_key
-                FROM information_schema.columns c
-                LEFT JOIN (
-                    SELECT ku.column_name
-                    FROM information_schema.table_constraints tc
-                    JOIN information_schema.key_column_usage ku
-                        ON tc.constraint_name = ku.constraint_name
-                        AND tc.table_schema = ku.table_schema
-                    WHERE tc.constraint_type = 'PRIMARY KEY'
-                        AND tc.table_name = '{}'
-                        AND tc.table_schema = '{}'
-                ) pk ON c.column_name = pk.column_name
-                WHERE c.table_name = '{}' AND c.table_schema = '{}'
-                ORDER BY c.ordinal_position",
-                table_name,
-                schema.unwrap_or("public"),
-                table_name,
-                schema.unwrap_or("public")
-            )
-        }
-        DatabaseType::MySQL => {
-            format!(
-                "SELECT
-                    column_name,
-                    data_type,
-                    is_nullable,
-                    column_default,
-                    CASE WHEN column_key = 'PRI' THEN 1 ELSE 0 END as is_primary_key
-                FROM information_schema.columns
-                WHERE table_name = '{}' AND table_schema = DATABASE()
-                ORDER BY ordinal_position",
-                table_name
-            )
-        }
-        DatabaseType::SQLite => {
-            format!("PRAGMA table_info('{}')", table_name)
-        }
-    };
-
-    let rows = sqlx::query(&query)
-        .fetch_all(&pool)
-        .await
-        .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
-
-    let mut columns = Vec::new();
+    let mut schemas = Vec::new();
 
     if matches!(creds.db_type, DatabaseType::SQLite) {
-        // SQLite PRAGMA returns different column names
-        for row in rows {
-            let col_name: String = row
-                .try_get("name")
-                .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
-            let data_type: String = row
-                .try_get("type")
-                .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
-            let not_null: i32 = row
-                .try_get("notnull")
-                .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
-            let pk: i32 = row
-                .try_get("pk")
-                .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
-            let default_val: Option<String> = row.try_get("dflt_value").ok();
+        // SQLite: PRAGMA only works for one table at a time
+        // Parse table_names like "('users', 'files')" to extract individual tables
+        let tables: Vec<&str> = table_names
+            .trim_matches(|c| c == '(' || c == ')')
+            .split(',')
+            .map(|s| s.trim().trim_matches('\'').trim_matches('"'))
+            .filter(|s| !s.is_empty())
+            .collect();
 
-            columns.push(ColumnInfo {
-                name: col_name,
-                data_type,
-                is_nullable: not_null == 0,
-                is_primary_key: pk > 0,
-                default_value: default_val,
+        for table_name in tables {
+            let query = format!("PRAGMA table_info('{}')", table_name);
+            let rows = sqlx::query(&query)
+                .fetch_all(&pool)
+                .await
+                .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+            let mut columns = Vec::new();
+            for row in rows {
+                let col_name: String = row
+                    .try_get("name")
+                    .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+                let data_type: String = row
+                    .try_get("type")
+                    .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+                let not_null: i32 = row
+                    .try_get("notnull")
+                    .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+                let pk: i32 = row
+                    .try_get("pk")
+                    .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+                let default_val: Option<String> = row.try_get("dflt_value").ok();
+
+                columns.push(ColumnInfo {
+                    name: col_name,
+                    data_type,
+                    is_nullable: not_null == 0,
+                    is_primary_key: pk > 0,
+                    default_value: default_val,
+                });
+            }
+
+            schemas.push(TableSchema {
+                table_name: table_name.to_string(),
+                schema: None,
+                columns,
             });
         }
     } else {
+        // Postgres and MySQL can query multiple tables at once
+        let query = match creds.db_type {
+            DatabaseType::Postgres => {
+                format!(
+                    "SELECT
+                        c.table_name::text,
+                        c.column_name::text,
+                        c.data_type::text,
+                        c.is_nullable::text,
+                        c.column_default::text,
+                        CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_primary_key
+                    FROM information_schema.columns c
+                    LEFT JOIN (
+                        SELECT ku.table_name::text, ku.column_name::text
+                        FROM information_schema.table_constraints tc
+                        JOIN information_schema.key_column_usage ku
+                            ON tc.constraint_name = ku.constraint_name
+                            AND tc.table_schema = ku.table_schema
+                        WHERE tc.constraint_type = 'PRIMARY KEY'
+                            AND tc.table_name IN {}
+                            AND tc.table_schema = '{}'
+                    ) pk ON c.table_name = pk.table_name AND c.column_name = pk.column_name
+                    WHERE c.table_name IN {} AND c.table_schema = '{}'
+                    ORDER BY c.table_name, c.ordinal_position",
+                    table_names,
+                    schema.unwrap_or("public"),
+                    table_names,
+                    schema.unwrap_or("public")
+                )
+            }
+            DatabaseType::MySQL => {
+                format!(
+                    "SELECT
+                        table_name,
+                        column_name,
+                        data_type,
+                        is_nullable,
+                        column_default,
+                        CASE WHEN column_key = 'PRI' THEN 1 ELSE 0 END as is_primary_key
+                    FROM information_schema.columns
+                    WHERE table_name IN {} AND table_schema = DATABASE()
+                    ORDER BY table_name, ordinal_position",
+                    table_names
+                )
+            }
+            DatabaseType::SQLite => unreachable!(),
+        };
+
+        let rows = sqlx::query(&query)
+            .fetch_all(&pool)
+            .await
+            .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+        // Group columns by table name
+        use std::collections::HashMap;
+        let mut tables_map: HashMap<String, Vec<ColumnInfo>> = HashMap::new();
+
         for row in rows {
+            let table_name: String = row
+                .try_get("table_name")
+                .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
             let col_name: String = row
                 .try_get("column_name")
                 .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
@@ -163,23 +194,32 @@ pub async fn get_table_schema(
                 pk_val
             };
 
-            columns.push(ColumnInfo {
+            let column_info = ColumnInfo {
                 name: col_name,
                 data_type,
                 is_nullable,
                 is_primary_key: is_pk,
                 default_value: default_val,
+            };
+
+            tables_map
+                .entry(table_name)
+                .or_insert_with(Vec::new)
+                .push(column_info);
+        }
+
+        // Convert HashMap to Vec<TableSchema>
+        for (table_name, columns) in tables_map {
+            schemas.push(TableSchema {
+                table_name,
+                schema: schema.map(|s| s.to_string()),
+                columns,
             });
         }
     }
 
     pool.close().await;
-
-    Ok(TableSchema {
-        table_name: table_name.to_string(),
-        schema: schema.map(|s| s.to_string()),
-        columns,
-    })
+    Ok(schemas)
 }
 
 pub async fn get_relationships(
@@ -268,11 +308,11 @@ pub async fn get_database_tables(
 #[tauri::command]
 pub async fn get_database_table_schema(
     database_id: String,
-    table_name: String,
+    table_names: String,
     schema: Option<String>,
     store: State<'_, CredentialStore>,
-) -> Result<TableSchema, String> {
-    get_table_schema(&database_id, &table_name, schema.as_deref(), &store)
+) -> Result<Vec<TableSchema>, String> {
+    get_table_schema(&database_id, &table_names, schema.as_deref(), &store)
         .await
         .map_err(|e| e.to_string())
 }

@@ -28,4 +28,9 @@ sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "macros", "postgre
 thiserror = "2.0"
 uuid = { version = "1.11", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+# Encryption dependencies for secure credential storage
+aes-gcm = "0.10"
+argon2 = "0.5"
+base64 = "0.22"
+rand = "0.8"
 

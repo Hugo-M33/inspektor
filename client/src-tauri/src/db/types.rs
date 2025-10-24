@@ -89,6 +89,9 @@ pub enum DatabaseError {
     #[error("Destructive operation not allowed: {0}")]
     DestructiveOperation(String),
 
+    #[error("Encryption error: {0}")]
+    EncryptionError(String),
+
     #[error("Database error: {0}")]
     Other(String),
 }
