@@ -55,7 +55,6 @@ export interface Relationship {
 }
 
 export interface MetadataRequest {
-  request_id: string;
   metadata_type: 'tables' | 'schema' | 'relationships';
   params?: Record<string, any>;
   reason: string;
@@ -68,9 +67,11 @@ export interface SQLResponse {
 }
 
 export interface QueryResponse {
-  status: 'needs_metadata' | 'ready' | 'error';
+  status: 'needs_metadata' | 'ready' | 'error' | 'clarification';
+  conversation_id: string;
   metadata_request?: MetadataRequest;
   sql_response?: SQLResponse;
+  message?: string;
   error?: string;
 }
 
