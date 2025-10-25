@@ -13,17 +13,17 @@ pub async fn get_tables(
 
     let query = match creds.db_type {
         DatabaseType::Postgres => {
-            "SELECT table_name::text, table_schema::text FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY table_name"
+            "SELECT table_name::text, table_schema::text FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY table_name".to_string()
         }
         DatabaseType::MySQL => {
-            "SELECT table_name, table_schema FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY table_name"
+            format!("SELECT table_name, table_schema FROM information_schema.tables WHERE table_schema = '{}' ORDER BY table_name", creds.database)
         }
         DatabaseType::SQLite => {
-            "SELECT name as table_name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            "SELECT name as table_name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name".to_string()
         }
     };
 
-    let rows = sqlx::query(query)
+    let rows = sqlx::query(&query)
         .fetch_all(&pool)
         .await
         .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
@@ -151,9 +151,10 @@ pub async fn get_table_schema(
                         column_default,
                         CASE WHEN column_key = 'PRI' THEN 1 ELSE 0 END as is_primary_key
                     FROM information_schema.columns
-                    WHERE table_name IN {} AND table_schema = DATABASE()
+                    WHERE table_name IN {} AND table_schema = '{}'
                     ORDER BY table_name, ordinal_position",
-                    table_names
+                    table_names,
+                    creds.database
                 )
             }
             DatabaseType::SQLite => unreachable!(),
@@ -248,6 +249,11 @@ async fn get_explicit_relationships(
     creds: &super::types::DatabaseCredentials,
     pool: &sqlx::AnyPool,
 ) -> Result<Vec<Relationship>, DatabaseError> {
+    // Handle SQLite separately since it uses PRAGMA
+    if matches!(creds.db_type, DatabaseType::SQLite) {
+        return get_sqlite_foreign_keys(pool).await;
+    }
+
     let query = match creds.db_type {
         DatabaseType::Postgres => {
             "SELECT
@@ -263,26 +269,26 @@ async fn get_explicit_relationships(
             JOIN information_schema.constraint_column_usage AS ccu
                 ON ccu.constraint_name = tc.constraint_name
                 AND ccu.table_schema = tc.table_schema
-            WHERE tc.constraint_type = 'FOREIGN KEY'"
+            WHERE tc.constraint_type = 'FOREIGN KEY'".to_string()
         }
         DatabaseType::MySQL => {
-            "SELECT
-                table_name,
-                column_name,
-                referenced_table_name AS foreign_table,
-                referenced_column_name AS foreign_column,
-                constraint_name
-            FROM information_schema.key_column_usage
-            WHERE referenced_table_name IS NOT NULL
-                AND table_schema = DATABASE()"
+            format!(
+                "SELECT
+                    table_name,
+                    column_name,
+                    referenced_table_name AS foreign_table,
+                    referenced_column_name AS foreign_column,
+                    constraint_name
+                FROM information_schema.key_column_usage
+                WHERE referenced_table_name IS NOT NULL
+                    AND table_schema = '{}'",
+                creds.database
+            )
         }
-        DatabaseType::SQLite => {
-            // SQLite: Get all tables first, then use PRAGMA for each
-            return get_sqlite_foreign_keys(pool).await;
-        }
+        DatabaseType::SQLite => unreachable!(),
     };
 
-    let rows = sqlx::query(query)
+    let rows = sqlx::query(&query)
         .fetch_all(pool)
         .await
         .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
@@ -505,17 +511,17 @@ async fn get_all_table_schemas(
     // Get all table names first
     let tables_query = match creds.db_type {
         DatabaseType::Postgres => {
-            "SELECT table_name::text FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema')"
+            "SELECT table_name::text FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema')".to_string()
         }
         DatabaseType::MySQL => {
-            "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()"
+            format!("SELECT table_name FROM information_schema.tables WHERE table_schema = '{}'", creds.database)
         }
         DatabaseType::SQLite => {
-            "SELECT name as table_name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            "SELECT name as table_name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'".to_string()
         }
     };
 
-    let table_rows = sqlx::query(tables_query)
+    let table_rows = sqlx::query(&tables_query)
         .fetch_all(pool)
         .await
         .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
@@ -626,9 +632,10 @@ async fn get_all_table_schemas(
                         column_default,
                         CASE WHEN column_key = 'PRI' THEN 1 ELSE 0 END as is_primary_key
                     FROM information_schema.columns
-                    WHERE table_name = '{}' AND table_schema = DATABASE()
+                    WHERE table_name = '{}' AND table_schema = '{}'
                     ORDER BY ordinal_position",
-                    table_name
+                    table_name,
+                    creds.database
                 );
 
                 let rows = sqlx::query(&query)
