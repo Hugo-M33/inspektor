@@ -97,6 +97,7 @@ IMPORTANT: ALWAYS call a tool. NEVER respond with text alone."""
         database_id: str,
         cached_metadata: Optional[Dict[str, Any]] = None,
         conversation_history: Optional[List[Dict[str, str]]] = None,
+        conversation_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Process a natural language query and return either a metadata request or SQL.
@@ -106,6 +107,7 @@ IMPORTANT: ALWAYS call a tool. NEVER respond with text alone."""
             database_id: Database identifier
             cached_metadata: Previously cached metadata
             conversation_history: Previous conversation messages
+            conversation_context: Extracted context from previous successful queries
 
         Returns:
             Response dict with status and either metadata_request or sql_response
@@ -138,6 +140,11 @@ IMPORTANT: ALWAYS call a tool. NEVER respond with text alone."""
                 user_message += f"\n\nAvailable metadata:\n{metadata_summary}"
                 plogger.info("Added cached metadata to user message")
 
+            if conversation_context:
+                context_summary = self._format_context_for_prompt(conversation_context)
+                user_message += f"\n\nLearned context from previous queries:\n{context_summary}"
+                plogger.info("Added conversation context to user message")
+
             messages.append({"role": "user", "content": user_message})
 
             # Log complete messages array being sent to LLM
@@ -147,9 +154,9 @@ IMPORTANT: ALWAYS call a tool. NEVER respond with text alone."""
                 role = msg.get("role", "unknown")
                 content = msg.get("content", "")
                 if role == "system":
-                    plogger.conversation_message(role, content[:500], indent=1)
+                    plogger.conversation_message(role, content, indent=1, max_length=5000)
                 else:
-                    plogger.conversation_message(role, content, indent=1, max_length=1500)
+                    plogger.conversation_message(role, content, indent=1, max_length=5000)
 
             # Get response from LLM with function calling
             plogger.separator("CALLING OPENAI API", "~", 100)
@@ -236,6 +243,7 @@ IMPORTANT: ALWAYS call a tool. NEVER respond with text alone."""
         failed_sql: str,
         error_message: str,
         cached_metadata: Optional[Dict[str, Any]] = None,
+        conversation_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Handle SQL execution errors and attempt to generate corrected SQL.
@@ -245,6 +253,7 @@ IMPORTANT: ALWAYS call a tool. NEVER respond with text alone."""
             failed_sql: SQL that failed to execute
             error_message: Error message from database
             cached_metadata: Available metadata
+            conversation_context: Workspace context with learned patterns and hints
 
         Returns:
             Response dict with corrected SQL or error
@@ -276,13 +285,18 @@ Database error:
                 error_context += f"\n\nAvailable metadata:\n{metadata_summary}"
                 plogger.info("Added cached metadata to error context")
 
+            if conversation_context:
+                context_summary = self._format_context_for_prompt(conversation_context)
+                error_context += f"\n\nLearned context from previous queries:\n{context_summary}"
+                plogger.info("Added workspace context to error correction prompt")
+
             error_context += "\n\nYou MUST call the generate_sql tool with the corrected query. Do not respond with text - only use the generate_sql tool to provide the fixed SQL."
 
             messages.append({"role": "user", "content": error_context})
 
             # Log error context being sent
             plogger.separator("ERROR CONTEXT SENT TO OPENAI", "~", 100)
-            plogger.conversation_message("user", error_context[:800], indent=1, max_length=800)
+            plogger.conversation_message("user", error_context[:2000], indent=1, max_length=2000)
 
             # Get response from LLM - force it to call generate_sql
             plogger.separator("CALLING OPENAI FOR ERROR CORRECTION", "~", 100)
@@ -418,6 +432,69 @@ Database error:
                         parts.append(f"  {rel}")
 
         return "\n".join(parts) if parts else "No metadata available"
+
+    def _format_context_for_prompt(self, context: Dict[str, Any]) -> str:
+        """
+        Format conversation context into a concise string for the LLM prompt.
+        Context includes learned relationships, business rules, and SQL patterns.
+
+        Args:
+            context: Conversation context dictionary
+
+        Returns:
+            Formatted string
+        """
+        parts = []
+
+        # Tables used in previous queries
+        if context.get("tables_used"):
+            tables = context["tables_used"]
+            if tables:
+                parts.append(f"Tables used in previous queries: {', '.join(tables)}")
+
+        # Known relationships
+        if context.get("relationships"):
+            relationships = context["relationships"]
+            if relationships:
+                parts.append("\nKnown relationships:")
+                for rel in relationships:
+                    if isinstance(rel, dict):
+                        parts.append(
+                            f"  - {rel.get('from_table')}.{rel.get('from_column')} → "
+                            f"{rel.get('to_table')}.{rel.get('to_column')} ({rel.get('type', 'unknown')})"
+                        )
+
+        # Column typecast hints
+        if context.get("column_typecast_hints"):
+            hints = context["column_typecast_hints"]
+            if hints:
+                parts.append("\nColumn typecast hints:")
+                for hint in hints:
+                    if isinstance(hint, dict):
+                        example = f" (e.g., {hint['example']})" if hint.get("example") else ""
+                        parts.append(
+                            f"  - {hint.get('table')}.{hint.get('column')}: {hint.get('hint')}{example}"
+                        )
+
+        # Business context/rules
+        if context.get("business_context"):
+            business_rules = context["business_context"]
+            if business_rules:
+                parts.append("\nBusiness rules and domain knowledge:")
+                for rule in business_rules:
+                    parts.append(f"  - {rule}")
+
+        # SQL patterns
+        if context.get("sql_patterns"):
+            patterns = context["sql_patterns"]
+            if patterns:
+                parts.append("\nUseful SQL patterns:")
+                for pattern in patterns:
+                    if isinstance(pattern, dict):
+                        example = f"\n    Example: {pattern['example']}" if pattern.get("example") else ""
+                        parts.append(f"  - {pattern.get('pattern')}{example}")
+
+        return "\n".join(parts) if parts else "No context available yet"
 
     def get_token_usage(self) -> Dict[str, int]:
         """Get cumulative token usage statistics"""

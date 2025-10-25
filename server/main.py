@@ -30,6 +30,7 @@ from agent_openai import SQLAgent
 from session_manager import SessionManager
 from llm_interface import LLMError
 from logger_config import logger as plogger
+from context_analyzer import ContextAnalyzer
 
 # Load environment variables
 load_dotenv()
@@ -68,6 +69,10 @@ sql_agent = SQLAgent(
 session_manager = SessionManager(
     metadata_ttl_hours=int(os.getenv("METADATA_TTL_HOURS", "24"))
 )
+context_analyzer = ContextAnalyzer(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+)
 
 
 # ============ Request/Response Models ============
@@ -91,6 +96,7 @@ class QueryRequest(BaseModel):
     database_id: str
     query: str
     conversation_id: Optional[str] = None
+    workspace_id: Optional[str] = None
 
 class MetadataResponse(BaseModel):
     database_id: str
@@ -125,7 +131,7 @@ class ErrorFeedback(BaseModel):
 class ConversationSummary(BaseModel):
     id: str
     database_id: str
-    title: str
+    title: Optional[str]
     created_at: str
     updated_at: str
     message_count: int
@@ -133,7 +139,7 @@ class ConversationSummary(BaseModel):
 class ConversationDetail(BaseModel):
     id: str
     database_id: str
-    title: str
+    title: Optional[str]
     created_at: str
     updated_at: str
     messages: List[Dict[str, Any]]
@@ -163,6 +169,22 @@ class WorkspaceConnectionResponse(BaseModel):
     salt: str
     created_at: str
     updated_at: str
+
+class UpdateTitleRequest(BaseModel):
+    title: str
+
+class SatisfactionFeedback(BaseModel):
+    satisfied: bool
+    user_notes: Optional[str] = None
+
+class WorkspaceContextResponse(BaseModel):
+    workspace_id: str
+    context_data: Dict[str, Any]
+    created_at: str
+    updated_at: str
+
+class UpdateContextRequest(BaseModel):
+    context_data: Dict[str, Any]
 
 
 # ============ Authentication Helpers ============
@@ -370,7 +392,7 @@ async def process_query(
                 raise HTTPException(status_code=404, detail="Conversation not found")
         else:
             conversation = session_manager.create_conversation(
-                db, current_user.id, request.database_id
+                db, current_user.id, request.database_id, workspace_id=request.workspace_id
             )
             plogger.success(f"Created new conversation: {conversation.id}")
 
@@ -397,6 +419,23 @@ async def process_query(
                 db, conversation.id, "user", request.query
             )
 
+        # Get workspace context if available
+        workspace_context = None
+        if conversation.workspace_id:
+            workspace_context = session_manager.get_workspace_context(
+                db, conversation.workspace_id, current_user.id
+            )
+            if workspace_context:
+                plogger.separator("WORKSPACE CONTEXT", "-", 100)
+                plogger.info(f"Found context with {len(workspace_context.get('tables_used', []))} tables, "
+                            f"{len(workspace_context.get('business_context', []))} business rules")
+                plogger.info(f"✓ Context will be sent to LLM")
+            else:
+                plogger.info("No context found for this workspace yet")
+        else:
+            plogger.warning("⚠ Conversation has no workspace_id - context disabled")
+            workspace_context = None
+
         # Process query with agent
         plogger.separator("CALLING SQL AGENT", "-", 100)
         result = sql_agent.process_query(
@@ -404,6 +443,7 @@ async def process_query(
             database_id=request.database_id,
             cached_metadata=cached_metadata,
             conversation_history=conversation_history,
+            conversation_context=workspace_context,
         )
 
         # Log result
@@ -538,6 +578,30 @@ async def handle_error_feedback(
         )
         plogger.metadata_summary(cached_metadata, indent=0)
 
+        # Get conversation to find workspace_id
+        conversation = session_manager.get_conversation(
+            db, feedback.conversation_id, current_user.id
+        )
+
+        # Get workspace context if available
+        workspace_context = None
+        if conversation and conversation.workspace_id:
+            workspace_context = session_manager.get_workspace_context(
+                db, conversation.workspace_id, current_user.id
+            )
+            if workspace_context:
+                plogger.separator("WORKSPACE CONTEXT", "-", 100)
+                plogger.info(f"Found context with {len(workspace_context.get('tables_used', []))} tables, "
+                            f"{len(workspace_context.get('column_typecast_hints', []))} typecast hints, "
+                            f"{len(workspace_context.get('business_context', []))} business rules")
+                plogger.info(f"✓ Context will be sent to LLM for error correction")
+            else:
+                plogger.info("No context found for this workspace yet")
+        else:
+            if conversation:
+                plogger.warning("⚠ Conversation has no workspace_id - context disabled")
+            workspace_context = None
+
         # Handle error with agent
         plogger.separator("CALLING AGENT TO FIX ERROR", "-", 100)
         result = sql_agent.handle_error(
@@ -545,6 +609,7 @@ async def handle_error_feedback(
             failed_sql=feedback.sql,
             error_message=feedback.error_message,
             cached_metadata=cached_metadata,
+            conversation_context=workspace_context,
         )
 
         plogger.separator("ERROR HANDLING RESULT", "-", 100)
@@ -555,10 +620,7 @@ async def handle_error_feedback(
         elif result.get('metadata_request'):
             plogger.warning(f"Needs more metadata: {result['metadata_request'].get('metadata_type')}")
 
-        # Add error context to conversation
-        conversation = session_manager.get_conversation(
-            db, feedback.conversation_id, current_user.id
-        )
+        # Add error context to conversation (conversation already fetched above)
         if conversation:
             session_manager.add_message(
                 db,
@@ -686,6 +748,212 @@ async def delete_conversation(
     return {"status": "success", "message": "Conversation deleted"}
 
 
+@app.patch("/conversations/{conversation_id}/title")
+async def update_conversation_title(
+    conversation_id: str,
+    request: UpdateTitleRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Update a conversation's title.
+
+    Args:
+        conversation_id: Conversation ID
+        request: New title
+        current_user: Authenticated user
+        db: Database session
+    """
+    success = session_manager.update_conversation_title(
+        db, conversation_id, current_user.id, request.title
+    )
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    return {"status": "success", "message": "Title updated"}
+
+
+@app.post("/conversations/{conversation_id}/generate-title")
+async def generate_conversation_title(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Auto-generate a title for a conversation using LLM.
+
+    Args:
+        conversation_id: Conversation ID
+        current_user: Authenticated user
+        db: Database session
+    """
+    # Get conversation messages
+    conversation_history = session_manager.get_conversation_history_for_llm(
+        db, conversation_id, current_user.id
+    )
+
+    if not conversation_history:
+        raise HTTPException(status_code=404, detail="Conversation not found or empty")
+
+    try:
+        # Generate title
+        title = context_analyzer.generate_title(conversation_history)
+
+        # Update conversation
+        session_manager.update_conversation_title(
+            db, conversation_id, current_user.id, title
+        )
+
+        logger.info(f"Generated title for conversation {conversation_id}: {title}")
+
+        return {"status": "success", "title": title}
+
+    except Exception as e:
+        logger.error(f"Failed to generate title: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate title: {str(e)}")
+
+
+@app.post("/conversations/{conversation_id}/satisfaction")
+async def submit_satisfaction_feedback(
+    conversation_id: str,
+    feedback: SatisfactionFeedback,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Submit satisfaction feedback and trigger context analysis if satisfied.
+
+    Args:
+        conversation_id: Conversation ID
+        feedback: Satisfaction feedback
+        current_user: Authenticated user
+        db: Database session
+    """
+    # Verify conversation exists
+    conversation = session_manager.get_conversation(db, conversation_id, current_user.id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    if not feedback.satisfied:
+        # User is not satisfied - just log it
+        logger.info(f"User not satisfied with conversation {conversation_id}")
+        return {"status": "success", "message": "Feedback received"}
+
+    try:
+        # User is satisfied - analyze conversation for context
+        logger.info(f"User satisfied with conversation {conversation_id} - analyzing context")
+
+        # Get conversation history
+        conversation_history = session_manager.get_conversation_history_for_llm(
+            db, conversation_id, current_user.id
+        )
+
+        # Get metadata that was used
+        metadata_used = session_manager.get_cached_metadata(
+            db, current_user.id, conversation.database_id
+        )
+
+        # Analyze conversation
+        context_data = context_analyzer.analyze_conversation(
+            conversation_messages=conversation_history,
+            user_notes=feedback.user_notes,
+            metadata_used=metadata_used,
+        )
+
+        # Check if conversation has workspace_id
+        if not conversation.workspace_id:
+            logger.error(f"Conversation {conversation_id} has no workspace_id - cannot store context")
+            raise HTTPException(
+                status_code=400,
+                detail="This conversation is not associated with a workspace. Context can only be stored for workspace conversations."
+            )
+
+        # Store/merge context into workspace
+        context = session_manager.store_workspace_context(
+            db=db,
+            workspace_id=conversation.workspace_id,
+            user_id=current_user.id,
+            context_data=context_data,
+            source_conversation_id=conversation_id,
+        )
+
+        if not context:
+            raise HTTPException(status_code=500, detail="Failed to store workspace context")
+
+        logger.info(f"Stored/merged context for workspace {conversation.workspace_id} from conversation {conversation_id}")
+
+        return {
+            "status": "success",
+            "message": "Context analyzed and stored",
+            "context_id": context.id,
+        }
+
+    except LLMError as e:
+        logger.error(f"LLM error during context analysis: {e}")
+        raise HTTPException(status_code=500, detail=f"LLM error: {str(e)}")
+    except Exception as e:
+        logger.error(f"Failed to analyze context: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to analyze context: {str(e)}")
+
+
+@app.get("/workspaces/{workspace_id}/context", response_model=WorkspaceContextResponse)
+async def get_workspace_context(
+    workspace_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Get context data for a workspace.
+
+    Args:
+        workspace_id: Workspace ID
+        current_user: Authenticated user
+        db: Database session
+    """
+    # Get full context object
+    context = session_manager.get_workspace_context_full(db, workspace_id, current_user.id)
+
+    if not context:
+        raise HTTPException(status_code=404, detail="No context found for this workspace")
+
+    return WorkspaceContextResponse(
+        workspace_id=context.workspace_id,
+        context_data=context.context_data,
+        created_at=context.created_at.isoformat(),
+        updated_at=context.updated_at.isoformat(),
+    )
+
+
+@app.patch("/workspaces/{workspace_id}/context")
+async def update_workspace_context(
+    workspace_id: str,
+    request: UpdateContextRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Update context data for a workspace.
+
+    Args:
+        workspace_id: Workspace ID
+        request: Updated context data
+        current_user: Authenticated user
+        db: Database session
+    """
+    success = session_manager.update_workspace_context(
+        db, workspace_id, current_user.id, request.context_data
+    )
+
+    if not success:
+        raise HTTPException(
+            status_code=404,
+            detail="Context not found or not editable"
+        )
+
+    return {"status": "success", "message": "Workspace context updated"}
+
+
 class MessageRequest(BaseModel):
     message: str
     database_id: str
@@ -746,6 +1014,17 @@ async def send_message_to_conversation(
             db, conversation.id, "user", request.message
         )
 
+        # Get workspace context if available
+        workspace_context = None
+        if conversation.workspace_id:
+            workspace_context = session_manager.get_workspace_context(
+                db, conversation.workspace_id, current_user.id
+            )
+            if workspace_context:
+                plogger.info(f"✓ Using workspace context with {len(workspace_context.get('tables_used', []))} tables")
+        else:
+            plogger.warning("⚠ Conversation has no workspace_id - context disabled")
+
         # Process message with agent
         plogger.separator("CALLING SQL AGENT", "-", 100)
         result = sql_agent.process_query(
@@ -753,6 +1032,7 @@ async def send_message_to_conversation(
             database_id=request.database_id,
             cached_metadata=cached_metadata,
             conversation_history=conversation_history,
+            conversation_context=workspace_context,
         )
 
         # Log result

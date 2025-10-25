@@ -1,15 +1,18 @@
 import { useState } from 'react';
 import { User, Bot, Settings, Play, Eye, EyeOff } from 'lucide-react';
 import type { Message } from '../services/conversations';
+import type { DatabaseType } from '../types/database';
+import { SQLDisplay } from './SQLDisplay';
 
 interface MessageThreadProps {
   messages: Message[];
   isLoading?: boolean;
   onExecuteSQL?: (sql: string, messageId: string) => void;
   executingMessageId?: string | null;
+  dbType: DatabaseType;
 }
 
-export function MessageThread({ messages, isLoading, onExecuteSQL, executingMessageId }: MessageThreadProps) {
+export function MessageThread({ messages, isLoading, onExecuteSQL, executingMessageId, dbType }: MessageThreadProps) {
   const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set());
 
   const toggleExpanded = (messageId: string) => {
@@ -90,7 +93,7 @@ export function MessageThread({ messages, isLoading, onExecuteSQL, executingMess
                       <button
                         onClick={() => onExecuteSQL(message.metadata.sql, message.id)}
                         disabled={executingMessageId === message.id}
-                        className="btn-success flex items-center gap-1 px-3 py-1 text-xs"
+                        className="btn btn-success flex items-center gap-1 px-3 py-1 text-xs"
                       >
                         <Play className="w-3 h-3" />
                         {executingMessageId === message.id ? 'Executing...' : 'Execute'}
@@ -99,9 +102,7 @@ export function MessageThread({ messages, isLoading, onExecuteSQL, executingMess
                   </div>
                 </div>
                 {isExpanded && (
-                  <pre className="bg-dark-primary text-text-primary p-3 rounded border border-dark-border overflow-x-auto text-xs font-mono">
-                    {message.metadata.sql}
-                  </pre>
+                  <SQLDisplay sql={message.metadata.sql} dbType={dbType} />
                 )}
               </div>
             )}

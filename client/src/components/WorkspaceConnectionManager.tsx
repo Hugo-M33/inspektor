@@ -8,6 +8,8 @@ import {
 } from '../services/workspaces';
 import { encryptConnection, decryptConnection } from '../services/encryption';
 import { PasswordPrompt } from './PasswordPrompt';
+import { AlertModal } from './AlertModal';
+import { ConfirmModal } from './ConfirmModal';
 import { testDatabaseConnection, saveCredentials } from '../services/tauri';
 import type { DatabaseCredentials, DatabaseType } from '../types/database';
 
@@ -42,6 +44,16 @@ export function WorkspaceConnectionManager({
     host: 'localhost',
     port: 5432,
   });
+
+  // Modal states
+  const [alertModal, setAlertModal] = useState<{
+    message: string;
+    type: 'info' | 'success' | 'error';
+  } | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
 
   useEffect(() => {
     loadConnections();
@@ -98,7 +110,10 @@ export function WorkspaceConnectionManager({
       // Reload connections
       await loadConnections();
     } catch (error) {
-      alert(`Failed to save connection: ${error}`);
+      setAlertModal({
+        message: `Failed to save connection: ${error}`,
+        type: 'error',
+      });
     }
   };
 
@@ -117,13 +132,16 @@ export function WorkspaceConnectionManager({
         setTestingConnection(decryptPrompt.connection.id);
         try {
           const result = await testDatabaseConnection(credentials);
-          alert(
-            `${result.success ? 'Success' : 'Failed'}: ${result.message}\n${
-              result.server_version ? `Version: ${result.server_version}` : ''
-            }`
-          );
+          setAlertModal({
+            message: `${result.success ? 'Success' : 'Failed'}: ${result.message}\n${result.server_version ? `Version: ${result.server_version}` : ''
+            }`,
+            type: result.success ? 'success' : 'error',
+          });
         } catch (error) {
-          alert(`Connection test failed: ${error}`);
+          setAlertModal({
+            message: `Connection test failed: ${error}`,
+            type: 'error',
+          });
         } finally {
           setTestingConnection(null);
         }
@@ -135,17 +153,23 @@ export function WorkspaceConnectionManager({
     }
   };
 
-  const handleDelete = async (connectionId: string) => {
-    if (!confirm('Are you sure you want to delete this connection?')) {
-      return;
-    }
-
-    try {
-      await deleteWorkspaceConnection(workspaceId, connectionId);
-      await loadConnections();
-    } catch (error) {
-      alert(`Failed to delete connection: ${error}`);
-    }
+  const handleDelete = (connectionId: string) => {
+    setConfirmModal({
+      message: 'Are you sure you want to delete this connection?',
+      onConfirm: async () => {
+        try {
+          await deleteWorkspaceConnection(workspaceId, connectionId);
+          await loadConnections();
+          setConfirmModal(null);
+        } catch (error) {
+          setConfirmModal(null);
+          setAlertModal({
+            message: `Failed to delete connection: ${error}`,
+            type: 'error',
+          });
+        }
+      },
+    });
   };
 
   const handleTypeChange = (type: DatabaseType) => {
@@ -173,7 +197,7 @@ export function WorkspaceConnectionManager({
         </h2>
         <button
           onClick={() => setShowAddForm(!showAddForm)}
-          className={showAddForm ? 'btn-secondary' : 'btn-primary'}
+          className={'btn ' + (showAddForm ? 'btn-secondary' : 'btn-primary')}
         >
           {showAddForm ? 'Cancel' : '+ Add Connection'}
         </button>
@@ -311,14 +335,14 @@ export function WorkspaceConnectionManager({
                 type="button"
                 onClick={() => setEncryptPassword('prompt')}
                 disabled={!formData.name}
-                className="btn-primary"
+                className="btn btn-primary"
               >
                 Save Connection
               </button>
               <button
                 type="button"
                 onClick={() => setShowAddForm(false)}
-                className="btn-secondary"
+                className="btn btn-secondary"
               >
                 Cancel
               </button>
@@ -377,7 +401,7 @@ export function WorkspaceConnectionManager({
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setDecryptPrompt({ connection: conn, action: 'use' })}
-                    className="btn-primary flex items-center gap-2"
+                    className="btn btn-primary flex items-center gap-2"
                   >
                     <Play className="w-4 h-4" />
                     Open
@@ -385,7 +409,7 @@ export function WorkspaceConnectionManager({
                   <button
                     onClick={() => setDecryptPrompt({ connection: conn, action: 'test' })}
                     disabled={testingConnection === conn.id}
-                    className="btn-secondary"
+                    className="btn btn-secondary"
                   >
                     {testingConnection === conn.id ? 'Testing...' : 'Test Connection'}
                   </button>
@@ -419,6 +443,27 @@ export function WorkspaceConnectionManager({
           message={`Enter the password for "${decryptPrompt.connection.name}"`}
           onSubmit={handleDecrypt}
           onCancel={() => setDecryptPrompt(null)}
+        />
+      )}
+
+      {/* Alert Modal */}
+      {alertModal && (
+        <AlertModal
+          message={alertModal.message}
+          type={alertModal.type}
+          onClose={() => setAlertModal(null)}
+        />
+      )}
+
+      {/* Confirm Modal */}
+      {confirmModal && (
+        <ConfirmModal
+          title="Confirm Deletion"
+          message={confirmModal.message}
+          confirmText="Delete"
+          confirmVariant="danger"
+          onConfirm={confirmModal.onConfirm}
+          onCancel={() => setConfirmModal(null)}
         />
       )}
     </div>

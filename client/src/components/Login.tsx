@@ -96,14 +96,14 @@ export function Login({ onLogin, onSwitchToRegister }: LoginProps) {
             </div>
 
             <div className="pt-2">
-              <button type="submit" className="btn-primary w-full" disabled={loading}>
+              <button type="submit" className="btn btn-primary w-full" disabled={loading}>
                 {loading ? 'Signing in...' : 'Sign In'}
               </button>
             </div>
 
             <button
               type="button"
-              className="btn-secondary w-full"
+              className="btn btn-secondary w-full"
               disabled={loading}
             >
               Use SSO

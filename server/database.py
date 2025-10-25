@@ -125,6 +125,8 @@ class Workspace(Base):
     user = relationship("User", back_populates="workspaces")
     connections = relationship("WorkspaceConnection", back_populates="workspace", cascade="all, delete-orphan")
     conversations = relationship("Conversation", back_populates="workspace")
+    contexts = relationship("WorkspaceContext", back_populates="workspace", cascade="all, delete-orphan")
+    workspace_users = relationship("WorkspaceUser", back_populates="workspace", cascade="all, delete-orphan")
 
     # Indexes
     __table_args__ = (
@@ -151,6 +153,58 @@ class WorkspaceConnection(Base):
     # Indexes
     __table_args__ = (
         Index("idx_workspace_conn_workspace", "workspace_id"),
+    )
+
+
+class WorkspaceContext(Base):
+    """
+    Stores accumulated context at workspace level.
+    Context includes learned relationships, typecast requirements, and business rules.
+    Shared across all conversations and users in the workspace.
+    """
+    __tablename__ = "workspace_context"
+
+    id = Column(String(36), primary_key=True)  # UUID
+    workspace_id = Column(String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    context_data = Column(JSON, nullable=False)  # Structured context extracted by LLM
+    is_editable = Column(Integer, default=1, nullable=False)  # SQLite uses 0/1 for boolean
+    created_by_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    source_conversation_id = Column(String(36), nullable=True)  # Optional: track where context came from
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    # Relationships
+    workspace = relationship("Workspace", back_populates="contexts")
+    created_by = relationship("User", foreign_keys=[created_by_user_id])
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_workspace_context_workspace", "workspace_id"),
+    )
+
+
+class WorkspaceUser(Base):
+    """
+    Many-to-many relationship for workspace sharing (future feature).
+    Allows multiple users to collaborate on a workspace.
+    """
+    __tablename__ = "workspace_users"
+
+    id = Column(String(36), primary_key=True)  # UUID
+    workspace_id = Column(String(36), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(String(20), nullable=False)  # "owner" or "member"
+    invited_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    accepted_at = Column(DateTime, nullable=True)  # NULL if invitation pending
+
+    # Relationships
+    workspace = relationship("Workspace", back_populates="workspace_users")
+    user = relationship("User")
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_workspace_users_workspace", "workspace_id"),
+        Index("idx_workspace_users_user", "user_id"),
     )
 
 

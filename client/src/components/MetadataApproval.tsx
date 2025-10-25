@@ -219,7 +219,7 @@ export function MetadataApproval({
                     <button
                       onClick={() => handleApprove(false)}
                       disabled={loading}
-                      className="btn-primary flex-1 flex items-center justify-center gap-2"
+                      className="btn btn-primary flex-1 flex items-center justify-center gap-2"
                     >
                       <CheckCircle className="w-4 h-4" />
                       {loading ? (isAutoApproving ? 'Auto-gathering...' : 'Gathering...') : 'Approve'}
@@ -227,7 +227,7 @@ export function MetadataApproval({
                     <button
                       onClick={onRejected}
                       disabled={loading}
-                      className="btn-danger flex items-center justify-center gap-2 px-6"
+                      className="btn btn-danger flex items-center justify-center gap-2 px-6"
                     >
                       <XCircle className="w-4 h-4" />
                       Reject

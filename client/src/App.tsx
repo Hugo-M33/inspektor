@@ -7,6 +7,7 @@ import { WorkspaceConnectionManager } from './components/WorkspaceConnectionMana
 import { QueryInterface } from './components/QueryInterface';
 import { Login } from './components/Login';
 import { Register } from './components/Register';
+import { AlertModal } from './components/AlertModal';
 import { getCredentials } from './services/tauri';
 import { checkHealth } from './services/llm';
 import { getAuthState, logout, type User } from './services/auth';
@@ -29,10 +30,17 @@ function App() {
   // Local connection state (legacy)
   const [selectedConnection, setSelectedConnection] = useState<string | null>(null);
   const [connectionName, setConnectionName] = useState<string>('');
+  const [connectionDbType, setConnectionDbType] = useState<DatabaseCredentials['db_type'] | null>(null);
 
   const [llmServerStatus, setLlmServerStatus] = useState<'checking' | 'online' | 'offline'>(
     'checking'
   );
+
+  // Alert modal state
+  const [alertModal, setAlertModal] = useState<{
+    message: string;
+    type: 'info' | 'success' | 'error';
+  } | null>(null);
 
   useEffect(() => {
     // Check authentication status on startup
@@ -77,6 +85,7 @@ function App() {
       setUser(null);
       setSelectedConnection(null);
       setConnectionName('');
+      setConnectionDbType(null);
       setSelectedWorkspace(null);
       setSelectedWorkspaceConnection(null);
     } catch (error) {
@@ -90,8 +99,12 @@ function App() {
       const creds = await getCredentials(id);
       setSelectedConnection(id);
       setConnectionName(creds.name);
+      setConnectionDbType(creds.db_type);
     } catch (error) {
-      alert(`Failed to load connection: ${error}`);
+      setAlertModal({
+        message: `Failed to load connection: ${error}`,
+        type: 'error',
+      });
     }
   };
 
@@ -103,6 +116,7 @@ function App() {
   const handleBackToConnections = () => {
     setSelectedConnection(null);
     setConnectionName('');
+    setConnectionDbType(null);
     setSelectedWorkspaceConnection(null);
   };
 
@@ -249,6 +263,8 @@ function App() {
                     <QueryInterface
                       databaseId={selectedWorkspaceConnection.id}
                       databaseName={selectedWorkspaceConnection.name}
+                      dbType={selectedWorkspaceConnection.db_type}
+                      workspaceId={selectedWorkspace.id}
                     />
                   </div>
                 )}
@@ -266,7 +282,7 @@ function App() {
                     >
                       ← Back to Connections
                     </button>
-                    <QueryInterface databaseId={selectedConnection} databaseName={connectionName} />
+                    <QueryInterface databaseId={selectedConnection} databaseName={connectionName} dbType={connectionDbType!} />
                   </div>
                 )}
               </>
@@ -274,6 +290,15 @@ function App() {
           </div>
         </main>
       </div>
+
+      {/* Alert Modal */}
+      {alertModal && (
+        <AlertModal
+          message={alertModal.message}
+          type={alertModal.type}
+          onClose={() => setAlertModal(null)}
+        />
+      )}
     </div>
   );
 }

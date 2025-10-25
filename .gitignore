@@ -3,6 +3,7 @@ server/venv/
 server/__pycache__/
 server/*.pyc
 server/.env
+server/.env.production
 server/.pytest_cache/
 
 # Node
@@ -51,3 +52,19 @@ Thumbs.db
 *.msi
 *.deb
 *.rpm
+
+# Database files (production)
+server/inspektor.db
+server/inspektor.db-*
+backups/
+postgres_data/
+postgres_backups/
+*.sql
+*.sql.gz
+
+# Production environment files
+.env.production
+.env.local
+
+# Deployment artifacts
+deployment_backup/

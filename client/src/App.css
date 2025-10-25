@@ -1,130 +1,166 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-@layer base {
-  * {
-    @apply box-border;
-  }
+/* ================================
+   🎨 THEME CONFIGURATION
+   ================================ */
+@theme {
+  /* Colors */
+  --color-dark-primary: #0a0e1a;
+  --color-dark-secondary: #141b2d;
+  --color-dark-card: #1e293b;
+  --color-dark-border: #2d3748;
+  --color-dark-hover: #252f43;
 
-  body {
-    @apply m-0 p-0 font-sans antialiased;
-    @apply bg-dark-primary text-text-primary;
-  }
+  --color-accent-blue: #60a5fa;
+  --color-accent-purple: #a78bfa;
+  --color-accent-green: #10b981;
+  --color-accent-orange: #f59e0b;
+  --color-accent-red: #ef4444;
 
-  #root {
-    @apply min-h-screen;
+  --color-text-primary: #e5e7eb;
+  --color-text-secondary: #9ca3af;
+  --color-text-tertiary: #6b7280;
+
+  /* Fonts */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+
+  /* Shadows */
+  --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.3),
+    0 2px 4px -1px rgba(0, 0, 0, 0.2);
+  --shadow-card-hover: 0 10px 15px -3px rgba(0, 0, 0, 0.4),
+    0 4px 6px -2px rgba(0, 0, 0, 0.3);
+
+  /* Backdrop */
+  --blur-glass: 12px;
+}
+
+/* ================================
+   🧱 BASE STYLES
+   ================================ */
+* {
+  @apply box-border;
+}
+
+body {
+  @apply m-0 p-0 font-sans antialiased bg-dark-primary text-text-primary;
+}
+
+#root {
+  @apply min-h-screen;
+}
+
+/* ================================
+   ⚙️ CUSTOM UTILITIES
+   ================================ */
+
+/* Buttons */
+@utility btn {
+  @apply px-4 py-2 rounded-lg font-medium transition-all duration-200;
+  @apply focus:outline-none focus:ring-2 focus:ring-accent-blue focus:ring-offset-2 focus:ring-offset-dark-primary;
+}
+@utility btn-primary {
+  @apply bg-accent-blue text-white hover:bg-blue-500 hover:shadow-lg;
+  @apply disabled:bg-text-tertiary disabled:cursor-not-allowed disabled:opacity-60;
+}
+
+@utility btn-secondary {
+  @apply bg-dark-card text-text-primary border border-dark-border;
+  @apply hover:bg-dark-hover hover:border-text-tertiary;
+  @apply disabled:opacity-60 disabled:cursor-not-allowed;
+}
+
+@utility btn-danger {
+  @apply bg-accent-red text-white hover:bg-red-600 hover:shadow-lg;
+  @apply disabled:opacity-60 disabled:cursor-not-allowed;
+}
+
+@utility btn-success {
+  @apply bg-accent-green text-white hover:bg-green-600 hover:shadow-lg;
+  @apply disabled:opacity-60 disabled:cursor-not-allowed;
+}
+
+/* Inputs */
+@utility input {
+  @apply w-full px-3 py-2 rounded-lg;
+  @apply bg-dark-card border border-dark-border text-text-primary;
+  @apply placeholder:text-text-tertiary;
+  @apply focus:outline-none focus:ring-2 focus:ring-accent-blue focus:border-transparent;
+  @apply disabled:bg-dark-secondary disabled:cursor-not-allowed disabled:opacity-60;
+}
+
+/* Cards */
+@utility card {
+  @apply bg-dark-card rounded-lg shadow-card p-6;
+
+  &-hover {
+    @apply transition-shadow duration-200 hover:shadow-card-hover;
   }
 }
 
-@layer components {
-  /* Custom scrollbar styling */
-  .custom-scrollbar::-webkit-scrollbar {
+/* Badges */
+@utility badge {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+
+  &-blue {
+    @apply bg-accent-blue/20 text-accent-blue;
+  }
+
+  &-green {
+    @apply bg-accent-green/20 text-accent-green;
+  }
+
+  &-orange {
+    @apply bg-accent-orange/20 text-accent-orange;
+  }
+
+  &-red {
+    @apply bg-accent-red/20 text-accent-red;
+  }
+}
+
+/* Status Dots */
+@utility status-dot {
+  @apply w-2 h-2 rounded-full;
+
+  &-online {
+    @apply bg-accent-green;
+  }
+
+  &-offline {
+    @apply bg-accent-red;
+  }
+
+  &-checking {
+    @apply bg-accent-orange;
+  }
+}
+
+/* Scrollbars */
+@utility custom-scrollbar {
+  &::-webkit-scrollbar {
     @apply w-2 h-2;
   }
 
-  .custom-scrollbar::-webkit-scrollbar-track {
+  &::-webkit-scrollbar-track {
     @apply bg-dark-secondary rounded;
   }
 
-  .custom-scrollbar::-webkit-scrollbar-thumb {
+  &::-webkit-scrollbar-thumb {
     @apply bg-text-tertiary rounded;
   }
 
-  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  &::-webkit-scrollbar-thumb:hover {
     @apply bg-text-secondary;
-  }
-
-  /* Button base styles */
-  .btn {
-    @apply px-4 py-2 rounded-lg font-medium transition-all duration-200;
-    @apply focus:outline-none focus:ring-2 focus:ring-accent-blue focus:ring-offset-2 focus:ring-offset-dark-primary;
-  }
-
-  .btn-primary {
-    @apply btn bg-accent-blue text-white hover:bg-blue-500 hover:shadow-lg;
-    @apply disabled:bg-text-tertiary disabled:cursor-not-allowed disabled:opacity-60;
-  }
-
-  .btn-secondary {
-    @apply btn bg-dark-card text-text-primary border border-dark-border;
-    @apply hover:bg-dark-hover hover:border-text-tertiary;
-    @apply disabled:opacity-60 disabled:cursor-not-allowed;
-  }
-
-  .btn-danger {
-    @apply btn bg-accent-red text-white hover:bg-red-600 hover:shadow-lg;
-    @apply disabled:opacity-60 disabled:cursor-not-allowed;
-  }
-
-  .btn-success {
-    @apply btn bg-accent-green text-white hover:bg-green-600 hover:shadow-lg;
-    @apply disabled:opacity-60 disabled:cursor-not-allowed;
-  }
-
-  /* Input base styles */
-  .input {
-    @apply w-full px-3 py-2 rounded-lg;
-    @apply bg-dark-card border border-dark-border text-text-primary;
-    @apply placeholder:text-text-tertiary;
-    @apply focus:outline-none focus:ring-2 focus:ring-accent-blue focus:border-transparent;
-    @apply disabled:bg-dark-secondary disabled:cursor-not-allowed disabled:opacity-60;
-  }
-
-  /* Card styles */
-  .card {
-    @apply bg-dark-card rounded-lg shadow-card p-6;
-  }
-
-  .card-hover {
-    @apply card transition-shadow duration-200 hover:shadow-card-hover;
-  }
-
-  /* Badge styles */
-  .badge {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
-  }
-
-  .badge-blue {
-    @apply badge bg-accent-blue/20 text-accent-blue;
-  }
-
-  .badge-green {
-    @apply badge bg-accent-green/20 text-accent-green;
-  }
-
-  .badge-orange {
-    @apply badge bg-accent-orange/20 text-accent-orange;
-  }
-
-  .badge-red {
-    @apply badge bg-accent-red/20 text-accent-red;
-  }
-
-  /* Status indicators */
-  .status-dot {
-    @apply w-2 h-2 rounded-full;
-  }
-
-  .status-dot-online {
-    @apply status-dot bg-accent-green;
-  }
-
-  .status-dot-offline {
-    @apply status-dot bg-accent-red;
-  }
-
-  .status-dot-checking {
-    @apply status-dot bg-accent-orange;
   }
 }
 
-@layer utilities {
-  .glass {
-    @apply backdrop-blur-glass bg-white/5;
-  }
+/* Glass effect */
+@utility glass {
+  @apply backdrop-blur-glass bg-white/5;
+}
 
-  .text-gradient {
-    @apply bg-gradient-to-r from-accent-blue to-accent-purple bg-clip-text text-transparent;
-  }
+/* Gradient text */
+@utility text-gradient {
+  @apply bg-gradient-to-r from-accent-blue to-accent-purple bg-clip-text text-transparent;
 }
