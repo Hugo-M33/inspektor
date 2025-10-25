@@ -11,7 +11,7 @@ services:
     image: postgres:16-alpine
     container_name: inspektor-postgres-prod
     ports:
-      - "127.0.0.1:5432:5432"  # Bind to localhost only
+      - "127.0.0.1:7654:5432"  # Bind to localhost only (external:internal)
     environment:
       - POSTGRES_DB=inspektor
       - POSTGRES_USER=inspektor
