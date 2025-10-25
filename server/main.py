@@ -619,6 +619,7 @@ async def handle_error_feedback(
             plogger.info(f"Corrected SQL: {result['sql_response'].get('sql', '')[:300]}")
         elif result.get('metadata_request'):
             plogger.warning(f"Needs more metadata: {result['metadata_request'].get('metadata_type')}")
+            plogger.info(f"Reason: {result['metadata_request'].get('reason')}")
 
         # Add error context to conversation (conversation already fetched above)
         if conversation:
@@ -640,6 +641,16 @@ async def handle_error_feedback(
                     metadata={"sql": result["sql_response"]["sql"], "is_retry": True},
                 )
                 plogger.success("Added corrected SQL to conversation history")
+            elif result["status"] == "needs_metadata" and result.get("metadata_request"):
+                # LLM needs more metadata to fix the error (e.g., refresh schema due to column not found)
+                session_manager.add_message(
+                    db,
+                    conversation.id,
+                    "assistant",
+                    f"Need to refresh metadata: {result['metadata_request']['reason']}",
+                    metadata={"metadata_request": result["metadata_request"]},
+                )
+                plogger.success("Added metadata request to conversation history")
 
         result["conversation_id"] = feedback.conversation_id
         return QueryResponse(**result)

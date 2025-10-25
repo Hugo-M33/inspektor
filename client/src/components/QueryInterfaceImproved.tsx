@@ -23,6 +23,7 @@ export function QueryInterfaceImproved({
   const [sqlExplanation, setSqlExplanation] = useState<string | null>(null);
   const [queryResults, setQueryResults] = useState<QueryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [failedSQL, setFailedSQL] = useState<string | null>(null);
 
   // Load credentials on mount
   useState(() => {
@@ -54,9 +55,14 @@ export function QueryInterfaceImproved({
         setSqlExplanation(response.sql_response.explanation);
       } else if (response.status === 'error') {
         setError(response.error || 'Unknown error from LLM');
+        // If there's a failed SQL in the error response, show it
+        if (response.failed_sql) {
+          setFailedSQL(response.failed_sql);
+        }
       }
     } catch (err) {
-      setError(`Failed to process query: ${err}`);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      setError(`Failed to process query: ${errorMessage}`);
     } finally {
       setLoading(false);
     }
@@ -67,6 +73,7 @@ export function QueryInterfaceImproved({
 
     setLoading(true);
     setError(null);
+    setFailedSQL(null);
 
     try {
       const results = await executeSqlQuery(databaseId, generatedSQL);
@@ -74,6 +81,7 @@ export function QueryInterfaceImproved({
     } catch (err) {
       const errorMessage = String(err);
       setError(errorMessage);
+      setFailedSQL(generatedSQL); // Store the SQL that failed
 
       // Send error feedback to LLM for correction
       if (credentials) {
@@ -92,9 +100,17 @@ export function QueryInterfaceImproved({
             setError(
               `Previous query failed. Here's a corrected version:\n${errorMessage}`
             );
+          } else if (response.status === 'error') {
+            // Error correction failed - show the error to user
+            const correctionError = response.error || 'Could not generate corrected query';
+            setError(`${errorMessage}\n\nError correction failed: ${correctionError}`);
+            if (response.failed_sql) {
+              setFailedSQL(response.failed_sql);
+            }
           }
         } catch (feedbackErr) {
-          console.error('Failed to send error feedback:', feedbackErr);
+          const feedbackErrorMsg = feedbackErr instanceof Error ? feedbackErr.message : String(feedbackErr);
+          setError(`${errorMessage}\n\nFailed to send error feedback: ${feedbackErrorMsg}`);
         }
       }
     } finally {
@@ -108,6 +124,7 @@ export function QueryInterfaceImproved({
     setSqlExplanation(null);
     setQueryResults(null);
     setError(null);
+    setFailedSQL(null);
   };
 
   return (
@@ -134,8 +151,27 @@ export function QueryInterfaceImproved({
 
       {error && (
         <div className="error-message">
-          <h3>Error:</h3>
-          <pre>{error}</pre>
+          <h3>⚠️ Query Execution Failed</h3>
+          <div className="error-details">
+            <div className="error-section">
+              <h4>Error Message:</h4>
+              <pre className="error-text">{error}</pre>
+            </div>
+            {failedSQL && (
+              <div className="error-section">
+                <h4>Failed SQL Query:</h4>
+                <pre className="sql-code error-sql">{failedSQL}</pre>
+              </div>
+            )}
+            <div className="error-meta">
+              <span className="error-timestamp">
+                Failed at: {new Date().toLocaleString()}
+              </span>
+              <span className="error-db">
+                Database: {databaseName}
+              </span>
+            </div>
+          </div>
         </div>
       )}
 

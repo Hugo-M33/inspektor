@@ -160,7 +160,7 @@ export function QueryInterface({ databaseId, databaseName, dbType, workspaceId }
           const userMessage = messages.find(m => m.role === 'user');
           const originalQuery = userMessage?.content || '';
 
-          await sendErrorFeedback(
+          const errorResponse = await sendErrorFeedback(
             databaseId,
             conversationId,
             sql,
@@ -168,8 +168,14 @@ export function QueryInterface({ databaseId, databaseName, dbType, workspaceId }
             originalQuery
           );
 
-          // Refresh messages to show the corrected SQL
-          await refreshMessages();
+          // Check if the LLM needs metadata to fix the error
+          if (errorResponse.status === 'needs_metadata' && errorResponse.metadata_request) {
+            // LLM needs fresh metadata (e.g., schema refresh for "column doesn't exist")
+            setPendingMetadataRequest(errorResponse);
+          } else {
+            // Refresh messages to show the corrected SQL or error
+            await refreshMessages();
+          }
         } catch (feedbackErr) {
           console.error('Failed to send error feedback:', feedbackErr);
         }
@@ -380,6 +386,15 @@ export function QueryInterface({ databaseId, databaseName, dbType, workspaceId }
             onRejected={() => {
               setPendingMetadataRequest(null);
               setError('Metadata request was rejected by user');
+            }}
+            onError={(errorMessage) => {
+              // Show actual database error instead of generic rejection message
+              console.log('=== QueryInterface onError callback ===');
+              console.log('Received error message:', errorMessage);
+              console.log('Setting error state and clearing pending request');
+              setPendingMetadataRequest(null);
+              setError(errorMessage);
+              console.log('Error state set to:', errorMessage);
             }}
             autoMode={autoMode}
             maxAutoApprovals={maxAutoApprovals}
