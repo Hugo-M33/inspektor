@@ -1,4 +1,4 @@
-import type { QueryResponse, ConversationMessage } from "../types/database";
+import type { QueryResponse } from "../types/database";
 import { authenticatedFetch } from "./auth";
 import { config } from "../config";
 

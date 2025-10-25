@@ -25,7 +25,6 @@ interface MetadataApprovalProps {
 export function MetadataApproval({
   databaseId,
   conversationId,
-  originalQuery,
   metadataRequest,
   onApproved,
   onRejected,
