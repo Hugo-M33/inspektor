@@ -11,14 +11,14 @@ services:
     image: postgres:16-alpine
     container_name: inspektor-postgres-prod
     ports:
-      - "127.0.0.1:7654:5432"  # Bind to localhost only (external:internal)
+      - "127.0.0.1:7654:5432" # Bind to localhost only (external:internal)
     environment:
       - POSTGRES_DB=inspektor
       - POSTGRES_USER=inspektor
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}  # Override in .env
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme} # Override in .env
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - postgres_backups:/backups
+      - postgres_inspektor_data:/var/lib/postgresql/data
+      - postgres_inspektor_backups:/backups
       - ./server/scripts/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - inspektor-network
@@ -32,10 +32,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
+          cpus: "2"
           memory: 2G
         reservations:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
     logging:
       driver: "json-file"
@@ -56,7 +56,7 @@ services:
     image: inspektor-server:${VERSION:-latest}
     container_name: inspektor-server-prod
     ports:
-      - "127.0.0.1:8090:8090" # Bind to localhost only (use reverse proxy)
+      - "127.0.0.1:8099:8090" # Bind to localhost only (use reverse proxy)
     depends_on:
       postgres:
         condition: service_healthy
@@ -69,7 +69,7 @@ services:
     networks:
       - inspektor-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8099/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -93,7 +93,7 @@ services:
     # Security options
     security_opt:
       - no-new-privileges:true
-    read_only: true  # Enabled now that we use PostgreSQL (no file writes)
+    read_only: true # Enabled now that we use PostgreSQL (no file writes)
     tmpfs:
       - /tmp
     cap_drop:
@@ -112,9 +112,9 @@ networks:
         - subnet: 172.25.0.0/16
 
 volumes:
-  postgres_data:
+  postgres_inspektor_data:
     driver: local
-  postgres_backups:
+  postgres_inspektor_backups:
     driver: local
   inspektor_logs:
     driver: local
