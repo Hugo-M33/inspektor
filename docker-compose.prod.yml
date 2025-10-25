@@ -56,7 +56,7 @@ services:
     image: inspektor-server:${VERSION:-latest}
     container_name: inspektor-server-prod
     ports:
-      - "127.0.0.1:8099:8090" # Bind to localhost only (use reverse proxy)
+      - "127.0.0.1:8099:8099" # Bind to localhost only (use reverse proxy)
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,7 +65,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://inspektor:${POSTGRES_PASSWORD:-changeme}@postgres:5432/inspektor
       - HOST=0.0.0.0
-      - PORT=8090
+      - PORT=8099
     networks:
       - inspektor-network
     healthcheck:
