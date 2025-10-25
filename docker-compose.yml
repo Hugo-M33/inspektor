@@ -6,7 +6,7 @@ services:
     image: postgres:16-alpine
     container_name: inspektor-postgres
     ports:
-      - "5432:5432"
+      - "7654:5432"  # External port 7654 maps to internal 5432
     environment:
       - POSTGRES_DB=inspektor
       - POSTGRES_USER=inspektor
