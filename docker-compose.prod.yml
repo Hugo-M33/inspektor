@@ -1,75 +1,50 @@
-version: '3.8'
+version: "3.8"
 
-# Production Docker Compose configuration
+# Production Docker Compose configuration for VPS Deployment
+# This assumes nginx is running on the host VPS
+# Backend binds to localhost:8000 only, nginx proxies to it
 # Includes resource limits, health checks, and security best practices
 
 services:
-  ollama:
-    image: ollama/ollama:latest
-    container_name: inspektor-ollama-prod
+  # PostgreSQL Database (production)
+  postgres:
+    image: postgres:16-alpine
+    container_name: inspektor-postgres-prod
     ports:
-      - "127.0.0.1:11434:11434"  # Bind to localhost only
-    volumes:
-      - ollama_data:/root/.ollama
+      - "127.0.0.1:5432:5432"  # Bind to localhost only
     environment:
-      - OLLAMA_NUM_PARALLEL=4
-      - OLLAMA_MAX_LOADED_MODELS=1
-      - OLLAMA_HOST=0.0.0.0:11434
-      - OLLAMA_FLASH_ATTENTION=1
+      - POSTGRES_DB=inspektor
+      - POSTGRES_USER=inspektor
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}  # Override in .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - postgres_backups:/backups
+      - ./server/scripts/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - inspektor-network
     healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD-SHELL", "pg_isready -U inspektor"]
+      interval: 10s
+      timeout: 5s
       retries: 5
-      start_period: 60s
+      start_period: 30s
     restart: always
     deploy:
       resources:
         limits:
-          cpus: '4'
-          memory: 12G
-        reservations:
           cpus: '2'
-          memory: 8G
-      # Uncomment for GPU support
-      # resources:
-      #   reservations:
-      #     devices:
-      #       - driver: nvidia
-      #         count: 1
-      #         capabilities: [gpu]
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-
-  ollama-pull-mistral:
-    image: ollama/ollama:latest
-    container_name: inspektor-ollama-pull-prod
-    depends_on:
-      ollama:
-        condition: service_healthy
-    volumes:
-      - ollama_data:/root/.ollama
-    networks:
-      - inspektor-network
-    environment:
-      - OLLAMA_HOST=ollama:11434
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        echo "Checking if Mistral 7B is already downloaded..."
-        if ollama list | grep -q "mistral:7b"; then
-          echo "✓ Mistral 7B already exists"
-        else
-          echo "Pulling Mistral 7B model..."
-          ollama pull mistral:7b
-          echo "✓ Mistral 7B downloaded successfully"
-        fi
-    restart: "no"
+    # Security options
+    security_opt:
+      - no-new-privileges:true
 
   inspektor-server:
     build:
@@ -81,35 +56,35 @@ services:
     image: inspektor-server:${VERSION:-latest}
     container_name: inspektor-server-prod
     ports:
-      - "127.0.0.1:8000:8000"  # Bind to localhost only (use reverse proxy)
+      - "127.0.0.1:8090:8090" # Bind to localhost only (use reverse proxy)
     depends_on:
-      ollama:
+      postgres:
         condition: service_healthy
-      ollama-pull-mistral:
-        condition: service_completed_successfully
+    env_file:
+      - ./server/.env # Load from .env file (copied from .env.production during deployment)
     environment:
-      - OLLAMA_BASE_URL=http://ollama:11434
-      - OLLAMA_MODEL=mistral:7b
+      - DATABASE_URL=postgresql://inspektor:${POSTGRES_PASSWORD:-changeme}@postgres:5432/inspektor
       - HOST=0.0.0.0
-      - PORT=8000
+      - PORT=8090
     networks:
       - inspektor-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8090/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
     restart: always
+    volumes:
+      - inspektor_logs:/app/logs # Persist application logs
     deploy:
       resources:
         limits:
-          cpus: '2'
+          cpus: "2"
           memory: 4G
         reservations:
-          cpus: '1'
+          cpus: "1"
           memory: 2G
-      replicas: 2  # Run 2 instances for redundancy
     logging:
       driver: "json-file"
       options:
@@ -118,7 +93,7 @@ services:
     # Security options
     security_opt:
       - no-new-privileges:true
-    read_only: true
+    read_only: true  # Enabled now that we use PostgreSQL (no file writes)
     tmpfs:
       - /tmp
     cap_drop:
@@ -126,28 +101,8 @@ services:
     cap_add:
       - NET_BIND_SERVICE
 
-  # Nginx reverse proxy (optional but recommended for production)
-  nginx:
-    image: nginx:alpine
-    container_name: inspektor-nginx
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/certs:/etc/nginx/certs:ro
-    depends_on:
-      - inspektor-server
-    networks:
-      - inspektor-network
-    restart: always
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    profiles:
-      - with-proxy
+  # Note: Nginx is running on the host VPS, not in Docker
+  # See nginx-vps.conf for the host nginx configuration
 
 networks:
   inspektor-network:
@@ -157,5 +112,9 @@ networks:
         - subnet: 172.25.0.0/16
 
 volumes:
-  ollama_data:
+  postgres_data:
+    driver: local
+  postgres_backups:
+    driver: local
+  inspektor_logs:
     driver: local

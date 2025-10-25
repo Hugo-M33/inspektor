@@ -36,6 +36,7 @@ class SessionManager:
         user_id: str,
         database_id: str,
         title: Optional[str] = None,
+        workspace_id: Optional[str] = None,
     ) -> Conversation:
         """
         Create a new conversation.
@@ -44,7 +45,8 @@ class SessionManager:
             db: Database session
             user_id: User's ID
             database_id: Client-side database connection ID
-            title: Optional conversation title
+            title: Optional conversation title (defaults to None for auto-generation)
+            workspace_id: Optional workspace ID to associate conversation with
 
         Returns:
             Created Conversation object
@@ -53,7 +55,8 @@ class SessionManager:
             id=str(uuid.uuid4()),
             user_id=user_id,
             database_id=database_id,
-            title=title or f"Conversation {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
+            title=title,  # Now defaults to None for later auto-generation
+            workspace_id=workspace_id,
         )
 
         db.add(conversation)
@@ -456,3 +459,283 @@ class SessionManager:
             logger.info(f"Cleaned up {deleted} expired metadata entries")
 
         return deleted
+
+    # ============ Conversation Title Management ============
+
+    def update_conversation_title(
+        self,
+        db: Session,
+        conversation_id: str,
+        user_id: str,
+        title: str,
+    ) -> bool:
+        """
+        Update a conversation's title.
+
+        Args:
+            db: Database session
+            conversation_id: Conversation ID
+            user_id: User's ID (for authorization)
+            title: New title for the conversation
+
+        Returns:
+            True if updated, False if not found
+        """
+        conversation = self.get_conversation(db, conversation_id, user_id)
+
+        if not conversation:
+            return False
+
+        conversation.title = title
+        conversation.updated_at = datetime.utcnow()
+        db.commit()
+
+        logger.info(f"Updated conversation {conversation_id} title to: {title}")
+        return True
+
+    # ============ Context Management ============
+
+    def _merge_context_data(self, existing: Dict[str, Any], new: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Intelligently merge new context data with existing workspace context.
+
+        Args:
+            existing: Existing workspace context data
+            new: New context data to merge in
+
+        Returns:
+            Merged context data
+        """
+        merged = {}
+
+        # Merge tables_used - simple union with deduplication
+        merged["tables_used"] = list(set(
+            existing.get("tables_used", []) + new.get("tables_used", [])
+        ))
+
+        # Merge relationships - deduplicate by from/to table.column pairs
+        existing_rels = existing.get("relationships", [])
+        new_rels = new.get("relationships", [])
+        rel_signatures = set()
+        merged_rels = []
+
+        for rel in existing_rels + new_rels:
+            if isinstance(rel, dict):
+                sig = f"{rel.get('from_table')}.{rel.get('from_column')}->{rel.get('to_table')}.{rel.get('to_column')}"
+                if sig not in rel_signatures:
+                    rel_signatures.add(sig)
+                    merged_rels.append(rel)
+
+        merged["relationships"] = merged_rels
+
+        # Merge column_typecast_hints - deduplicate by table.column
+        existing_hints = existing.get("column_typecast_hints", [])
+        new_hints = new.get("column_typecast_hints", [])
+        hint_map = {}
+
+        for hint in existing_hints:
+            if isinstance(hint, dict):
+                key = f"{hint.get('table')}.{hint.get('column')}"
+                hint_map[key] = hint
+
+        for hint in new_hints:
+            if isinstance(hint, dict):
+                key = f"{hint.get('table')}.{hint.get('column')}"
+                # New hints override existing ones (more recent knowledge)
+                hint_map[key] = hint
+
+        merged["column_typecast_hints"] = list(hint_map.values())
+
+        # Merge business_context - append all unique rules
+        existing_biz = set(existing.get("business_context", []))
+        new_biz = set(new.get("business_context", []))
+        merged["business_context"] = list(existing_biz.union(new_biz))
+
+        # Merge SQL patterns - deduplicate by pattern name
+        existing_patterns = existing.get("sql_patterns", [])
+        new_patterns = new.get("sql_patterns", [])
+        pattern_map = {}
+
+        for pattern in existing_patterns:
+            if isinstance(pattern, dict):
+                key = pattern.get("pattern", "")
+                if key:
+                    pattern_map[key] = pattern
+
+        for pattern in new_patterns:
+            if isinstance(pattern, dict):
+                key = pattern.get("pattern", "")
+                if key:
+                    # New patterns override existing ones
+                    pattern_map[key] = pattern
+
+        merged["sql_patterns"] = list(pattern_map.values())
+
+        return merged
+
+    def store_workspace_context(
+        self,
+        db: Session,
+        workspace_id: str,
+        user_id: str,
+        context_data: Dict[str, Any],
+        source_conversation_id: Optional[str] = None,
+    ) -> Optional["WorkspaceContext"]:
+        """
+        Store or merge analyzed context into workspace.
+
+        Args:
+            db: Database session
+            workspace_id: Workspace ID
+            user_id: User's ID (creator of the context)
+            context_data: Structured context data from LLM analysis
+            source_conversation_id: Optional conversation ID that generated this context
+
+        Returns:
+            Created/updated WorkspaceContext object or None if workspace not found
+        """
+        from database import WorkspaceContext, Workspace
+
+        # Verify workspace exists (don't need to check ownership yet - that's for future sharing)
+        workspace = db.query(Workspace).filter(Workspace.id == workspace_id).first()
+        if not workspace:
+            return None
+
+        # Check if context already exists for this workspace
+        existing_context = db.query(WorkspaceContext).filter(
+            WorkspaceContext.workspace_id == workspace_id
+        ).first()
+
+        if existing_context:
+            # Merge new context with existing
+            merged_data = self._merge_context_data(existing_context.context_data, context_data)
+            existing_context.context_data = merged_data
+            existing_context.updated_at = datetime.utcnow()
+            db.commit()
+            db.refresh(existing_context)
+            logger.info(f"Merged new context into workspace {workspace_id}")
+            return existing_context
+        else:
+            # Create new context for workspace
+            context = WorkspaceContext(
+                id=str(uuid.uuid4()),
+                workspace_id=workspace_id,
+                context_data=context_data,
+                is_editable=1,
+                created_by_user_id=user_id,
+                source_conversation_id=source_conversation_id,
+            )
+            db.add(context)
+            db.commit()
+            db.refresh(context)
+            logger.info(f"Created initial context for workspace {workspace_id}")
+            return context
+
+    def get_workspace_context(
+        self,
+        db: Session,
+        workspace_id: str,
+        user_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get context data for a workspace.
+
+        Args:
+            db: Database session
+            workspace_id: Workspace ID
+            user_id: User's ID (for authorization - future use)
+
+        Returns:
+            Context data dictionary or None if not found
+        """
+        from database import WorkspaceContext, Workspace
+
+        # Verify workspace exists (authorization for future sharing)
+        workspace = db.query(Workspace).filter(
+            Workspace.id == workspace_id
+        ).first()
+
+        if not workspace:
+            return None
+
+        context = db.query(WorkspaceContext).filter(
+            WorkspaceContext.workspace_id == workspace_id
+        ).first()
+
+        return context.context_data if context else None
+
+    def update_workspace_context(
+        self,
+        db: Session,
+        workspace_id: str,
+        user_id: str,
+        context_data: Dict[str, Any],
+    ) -> bool:
+        """
+        Update context data for a workspace.
+
+        Args:
+            db: Database session
+            workspace_id: Workspace ID
+            user_id: User's ID (for authorization - future use)
+            context_data: Updated context data
+
+        Returns:
+            True if updated, False if not found or not editable
+        """
+        from database import WorkspaceContext, Workspace
+
+        # Verify workspace exists
+        workspace = db.query(Workspace).filter(
+            Workspace.id == workspace_id
+        ).first()
+
+        if not workspace:
+            return False
+
+        context = db.query(WorkspaceContext).filter(
+            WorkspaceContext.workspace_id == workspace_id
+        ).first()
+
+        if not context or not context.is_editable:
+            return False
+
+        context.context_data = context_data
+        context.updated_at = datetime.utcnow()
+        db.commit()
+
+        logger.info(f"Updated context for workspace {workspace_id}")
+        return True
+
+    def get_workspace_context_full(
+        self,
+        db: Session,
+        workspace_id: str,
+        user_id: str,
+    ) -> Optional["WorkspaceContext"]:
+        """
+        Get full WorkspaceContext object for a workspace (includes metadata).
+
+        Args:
+            db: Database session
+            workspace_id: Workspace ID
+            user_id: User's ID (for authorization - future use)
+
+        Returns:
+            WorkspaceContext object or None if not found
+        """
+        from database import WorkspaceContext, Workspace
+
+        # Verify workspace exists
+        workspace = db.query(Workspace).filter(
+            Workspace.id == workspace_id
+        ).first()
+
+        if not workspace:
+            return None
+
+        context = db.query(WorkspaceContext).filter(
+            WorkspaceContext.workspace_id == workspace_id
+        ).first()
+
+        return context

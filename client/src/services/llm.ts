@@ -1,12 +1,14 @@
 import type { QueryResponse, ConversationMessage } from "../types/database";
 import { authenticatedFetch } from "./auth";
+import { config } from "../config";
 
-const API_BASE_URL = "http://127.0.0.1:8000";
+const API_BASE_URL = config.apiUrl;
 
 export async function processQuery(
   databaseId: string,
   query: string,
-  conversationId?: string
+  conversationId?: string,
+  workspaceId?: string
 ): Promise<QueryResponse> {
   const response = await authenticatedFetch(`${API_BASE_URL}/query`, {
     method: "POST",
@@ -17,6 +19,7 @@ export async function processQuery(
       database_id: databaseId,
       query,
       conversation_id: conversationId,
+      workspace_id: workspaceId,
     }),
   });
 

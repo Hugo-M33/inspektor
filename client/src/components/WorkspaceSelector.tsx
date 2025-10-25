@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Lock, Plus, Trash2 } from 'lucide-react';
 import { listWorkspaces, createWorkspace, deleteWorkspace, type Workspace } from '../services/workspaces';
+import { ConfirmModal } from './ConfirmModal';
 
 interface WorkspaceSelectorProps {
   selectedWorkspaceId: string | null;
@@ -19,6 +20,10 @@ export function WorkspaceSelector({
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
 
   useEffect(() => {
     loadWorkspaces();
@@ -71,25 +76,28 @@ export function WorkspaceSelector({
     }
   };
 
-  const handleDeleteWorkspace = async (workspaceId: string) => {
-    if (!confirm('Are you sure you want to delete this workspace and all its connections?')) {
-      return;
-    }
+  const handleDeleteWorkspace = (workspaceId: string) => {
+    setConfirmModal({
+      message: 'Are you sure you want to delete this workspace and all its connections?',
+      onConfirm: async () => {
+        try {
+          await deleteWorkspace(workspaceId);
+          setWorkspaces((prev) => prev.filter((ws) => ws.id !== workspaceId));
 
-    try {
-      await deleteWorkspace(workspaceId);
-      setWorkspaces((prev) => prev.filter((ws) => ws.id !== workspaceId));
-
-      // If deleted workspace was selected, select another one
-      if (workspaceId === selectedWorkspaceId) {
-        const remaining = workspaces.filter((ws) => ws.id !== workspaceId);
-        if (remaining.length > 0) {
-          onSelectWorkspace(remaining[0]);
+          // If deleted workspace was selected, select another one
+          if (workspaceId === selectedWorkspaceId) {
+            const remaining = workspaces.filter((ws) => ws.id !== workspaceId);
+            if (remaining.length > 0) {
+              onSelectWorkspace(remaining[0]);
+            }
+          }
+          setConfirmModal(null);
+        } catch (err) {
+          setConfirmModal(null);
+          setError(err instanceof Error ? err.message : 'Failed to delete workspace');
         }
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete workspace');
-    }
+      },
+    });
   };
 
   if (loading) {
@@ -202,6 +210,18 @@ export function WorkspaceSelector({
             </div>
           ))}
         </div>
+      )}
+
+      {/* Confirm Modal */}
+      {confirmModal && (
+        <ConfirmModal
+          title="Confirm Deletion"
+          message={confirmModal.message}
+          confirmText="Delete"
+          confirmVariant="danger"
+          onConfirm={confirmModal.onConfirm}
+          onCancel={() => setConfirmModal(null)}
+        />
       )}
     </div>
   );
