@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { MessageSquare, X, Plus, Brain, Sparkles } from 'lucide-react';
+import { MessageSquare, X, Plus, Brain } from 'lucide-react';
 import type {
   QueryResponse,
   QueryResult,
@@ -13,7 +13,7 @@ import { MessageThread } from './MessageThread';
 import { ConversationHistory } from './ConversationHistory';
 import { SatisfactionPrompt } from './SatisfactionPrompt';
 import { ContextViewer } from './ContextViewer';
-import { getConversation, generateConversationTitle, type Message, type ConversationDetail } from '../services/conversations';
+import { getConversation, generateConversationTitle, type Message } from '../services/conversations';
 
 interface QueryInterfaceProps {
   databaseId: string;
@@ -160,7 +160,7 @@ export function QueryInterface({ databaseId, databaseName, dbType, workspaceId }
           const userMessage = messages.find(m => m.role === 'user');
           const originalQuery = userMessage?.content || '';
 
-          const response = await sendErrorFeedback(
+          await sendErrorFeedback(
             databaseId,
             conversationId,
             sql,

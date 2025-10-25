@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import type {
-  QueryResponse,
   QueryResult,
   DatabaseCredentials,
 } from '../types/database';
@@ -158,7 +157,7 @@ export function QueryInterfaceImproved({
 
       {queryResults && (
         <div className="results-section">
-          <ResultsViewer results={queryResults} sql={generatedSQL!} />
+          <ResultsViewer results={queryResults} sql={generatedSQL!} dbType={credentials?.db_type || 'postgres'} />
           <button onClick={handleNewQuery} className="new-query-btn">
             New Query
           </button>

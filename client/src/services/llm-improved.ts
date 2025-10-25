@@ -32,9 +32,9 @@ function buildConnectionObject(credentials: DatabaseCredentials) {
  * No manual metadata approval workflow needed!
  */
 export async function processQueryImproved(
-  databaseId: string,
+  _databaseId: string,
   query: string,
-  credentials: DatabaseCredentials
+  _credentials: DatabaseCredentials
 ): Promise<QueryResponse> {
   const response = await fetch(`${API_BASE_URL}/query`, {
     method: 'POST',
@@ -42,9 +42,7 @@ export async function processQueryImproved(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      //database_id: databaseId,
       query,
-      //connection: buildConnectionObject(credentials),
     }),
   });
 

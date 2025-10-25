@@ -264,7 +264,7 @@ function App() {
                       databaseId={selectedWorkspaceConnection.id}
                       databaseName={selectedWorkspaceConnection.name}
                       dbType={selectedWorkspaceConnection.db_type}
-                      workspaceId={selectedWorkspace.id}
+                      workspaceId={selectedWorkspace?.id}
                     />
                   </div>
                 )}

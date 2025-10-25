@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Play, Database as DatabaseIcon } from 'lucide-react';
+import { Trash2, Play, Database as DatabaseIcon } from 'lucide-react';
 import type { DatabaseCredentials, DatabaseType } from '../types/database';
 import {
   saveCredentials,

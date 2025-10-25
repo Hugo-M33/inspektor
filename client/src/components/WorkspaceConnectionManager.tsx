@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Play, Database as DatabaseIcon } from 'lucide-react';
+import { Trash2, Play, Database as DatabaseIcon } from 'lucide-react';
 import {
   listWorkspaceConnections,
   addWorkspaceConnection,
@@ -21,7 +21,6 @@ interface WorkspaceConnectionManagerProps {
 
 export function WorkspaceConnectionManager({
   workspaceId,
-  workspaceName,
   onSelectConnection,
 }: WorkspaceConnectionManagerProps) {
   const [connections, setConnections] = useState<WorkspaceConnection[]>([]);
