@@ -250,8 +250,6 @@ export function MetadataApproval({
                         <div>
                           <p className="text-sm font-medium text-red-500">Error</p>
                           <p className="text-xs text-red-400 mt-1">{error}</p>
-                          <p className="text-sm font-medium text-red-500">SQL Error</p>
-                          <p className="text-xs text-red-400 mt-1">{failed}</p>
 
                         </div>
                       </div>
