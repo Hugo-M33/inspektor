@@ -48,20 +48,27 @@ def get_tool_definitions() -> List[Dict[str, Any]]:
                 "required": ["table_names", "reason"],
             },
         },
-        #{
-        #    "name": "get_relationships",
-        #    "description": "Request foreign key relationships between tables. Use this when you need to perform JOINs and need to know how tables are related.",
-        #    "parameters": {
-        #        "type": "object",
-        #        "properties": {
-        #            "reason": {
-        #                "type": "string",
-        #                "description": "Brief explanation of why you need relationship information (shown to user for approval)",
-        #            }
-        #        },
-        #        "required": ["reason"],
-        #    },
-        #},
+        {
+            "name": "get_relationships",
+            "description": """Request table relationships for performing JOINs. Returns both explicit foreign key constraints AND inferred relationships based on naming patterns.
+
+IMPORTANT: Not all relationships are defined as database constraints. The response includes:
+- Explicit foreign keys (relationship_type: 'foreign_key') - high confidence
+- Inferred relationships (relationship_type: 'inferred') - based on column naming patterns like 'user_id', 'order_id', etc.
+- Confidence levels: 'high', 'medium', 'low' for inferred relationships
+
+Use this when you need to JOIN tables. Always validate inferred relationships against the schema before using them.""",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "description": "Brief explanation of why you need relationship information (shown to user for approval)",
+                    }
+                },
+                "required": ["reason"],
+            },
+        },
         {
             "name": "generate_sql",
             "description": "Generate the final SQL query when you have enough metadata. This is the final step after gathering necessary information.",

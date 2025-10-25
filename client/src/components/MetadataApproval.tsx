@@ -17,6 +17,7 @@ interface MetadataApprovalProps {
   metadataRequest: MetadataRequest;
   onApproved: (response: QueryResponse, wasAutoApproved?: boolean) => void;
   onRejected: () => void;
+  onError?: (error: string) => void;  // Optional error callback
   autoMode?: boolean;
   maxAutoApprovals?: number;
   currentAutoApprovalCount?: number;
@@ -28,12 +29,14 @@ export function MetadataApproval({
   metadataRequest,
   onApproved,
   onRejected,
+  onError,
   autoMode = false,
   maxAutoApprovals = 5,
   currentAutoApprovalCount = 0,
 }: MetadataApprovalProps) {
   const [loading, setLoading] = useState(false);
   const [isAutoApproving, setIsAutoApproving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Auto-approve metadata requests when auto mode is enabled
   useEffect(() => {
@@ -51,16 +54,24 @@ export function MetadataApproval({
 
   const handleApprove = async (isAuto: boolean = false) => {
     setLoading(true);
+    console.log('=== handleApprove started ===');
+    console.log('Metadata request type:', metadataRequest.metadata_type);
+    console.log('Database ID:', databaseId);
 
     try {
       let metadata: any;
+
+      // Get database credentials to extract db_type
+      const { getCredentials } = await import('../services/tauri');
+      const credentials = await getCredentials(databaseId);
+      const dbType = credentials.db_type;
 
       // Gather the requested metadata
       switch (metadataRequest.metadata_type) {
         case 'tables':
           const tables = await getDatabaseTables(databaseId);
           console.log(tables)
-          metadata = { tables: tables.map((t) => t.name) };
+          metadata = { tables: tables.map((t) => t.name), db_type: dbType };
           break;
 
         case 'schema':
@@ -81,12 +92,12 @@ export function MetadataApproval({
             schemaDict[tableSchema.table_name] = tableSchema.columns;
           });
 
-          metadata = schemaDict;
+          metadata = { ...schemaDict, db_type: dbType };
           break;
 
         case 'relationships':
           const relationships = await getDatabaseRelationships(databaseId);
-          metadata = { relationships };
+          metadata = { relationships, db_type: dbType };
           break;
 
         default:
@@ -104,8 +115,28 @@ export function MetadataApproval({
       // Pass the response back to parent with auto-approval flag
       onApproved(response, isAuto);
     } catch (error) {
-      console.error(`Failed to gather metadata: ${error}`);
-      onRejected();
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const detailedError = `Failed to gather metadata: ${errorMessage}`;
+
+      console.error('=== METADATA GATHERING ERROR ===');
+      console.error('Error object:', error);
+      console.error('Error message:', errorMessage);
+      console.error('Detailed error:', detailedError);
+      console.error('onError callback exists:', !!onError);
+      console.error('================================');
+
+      setError(detailedError);
+
+      // If parent provided an error callback, use it
+      if (onError) {
+        console.log('Calling onError callback with:', detailedError);
+        onError(detailedError);
+        // Don't call onRejected when we have onError - the error handler will close the dialog
+      } else {
+        console.warn('No onError callback provided, calling onRejected');
+        // Only call onRejected if no error handler is provided
+        onRejected();
+      }
     } finally {
       setLoading(false);
       setIsAutoApproving(false);
@@ -209,6 +240,20 @@ export function MetadataApproval({
                     {autoMode && currentAutoApprovalCount < maxAutoApprovals && (
                       <div className="text-sm text-text-tertiary">
                         Auto-approval: {currentAutoApprovalCount + 1}/{maxAutoApprovals}
+                      </div>
+                    )}
+
+                    {/* Error display */}
+                    {error && (
+                      <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                        <XCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-sm font-medium text-red-500">Error</p>
+                          <p className="text-xs text-red-400 mt-1">{error}</p>
+                          <p className="text-sm font-medium text-red-500">SQL Error</p>
+                          <p className="text-xs text-red-400 mt-1">{failed}</p>
+
+                        </div>
                       </div>
                     )}
                   </div>

@@ -32,7 +32,7 @@ class ContextAnalyzer:
 Given a conversation between a user and a SQL assistant, extract the following structured information:
 
 1. **Tables Used**: List all tables that were referenced in the conversation
-2. **Relationships**: Identify foreign key relationships discovered during the conversation
+2. **Relationships**: Identify table relationships discovered or used during the conversation
 3. **Column Typecast Hints**: Note any columns that required type casting or special handling
 4. **Business Context**: Extract business rules or domain knowledge mentioned by the user
 5. **SQL Patterns**: Common query patterns that were useful
@@ -46,7 +46,7 @@ CRITICAL: Your response MUST be valid JSON matching this exact schema:
             "from_column": "user_id",
             "to_table": "users",
             "to_column": "id",
-            "type": "foreign_key"
+            "type": "learned"
         }
     ],
     "column_typecast_hints": [
@@ -74,7 +74,9 @@ RULES:
 - Be concise but specific
 - If a section has no relevant information, use an empty array []
 - Ensure all JSON is properly formatted
-- Focus on reusable knowledge that would help future queries"""
+- Focus on reusable knowledge that would help future queries
+- For relationships, always use type "learned" to indicate these were discovered from successful queries
+- Include relationships that worked in JOINs, even if they weren't explicit foreign keys"""
 
     def analyze_conversation(
         self,

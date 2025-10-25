@@ -229,6 +229,25 @@ pub async fn get_relationships(
     let creds = store.get(database_id)?;
     let pool = create_pool(&creds).await?;
 
+    let mut relationships = Vec::new();
+
+    // Step 1: Get explicit foreign key constraints
+    let explicit_relationships = get_explicit_relationships(&creds, &pool).await?;
+    relationships.extend(explicit_relationships);
+
+    // Step 2: Infer relationships based on naming conventions and schema analysis
+    let inferred_relationships = infer_relationships(&creds, &pool).await?;
+    relationships.extend(inferred_relationships);
+
+    pool.close().await;
+    Ok(relationships)
+}
+
+/// Get explicit foreign key constraints from the database
+async fn get_explicit_relationships(
+    creds: &super::types::DatabaseCredentials,
+    pool: &sqlx::AnyPool,
+) -> Result<Vec<Relationship>, DatabaseError> {
     let query = match creds.db_type {
         DatabaseType::Postgres => {
             "SELECT
@@ -258,14 +277,13 @@ pub async fn get_relationships(
                 AND table_schema = DATABASE()"
         }
         DatabaseType::SQLite => {
-            // SQLite doesn't have a simple way to get all foreign keys
-            // We would need to run PRAGMA foreign_key_list for each table
-            return Ok(Vec::new());
+            // SQLite: Get all tables first, then use PRAGMA for each
+            return get_sqlite_foreign_keys(pool).await;
         }
     };
 
     let rows = sqlx::query(query)
-        .fetch_all(&pool)
+        .fetch_all(pool)
         .await
         .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
 
@@ -284,14 +302,414 @@ pub async fn get_relationships(
             foreign_column: row
                 .try_get("foreign_column")
                 .map_err(|e| DatabaseError::QueryError(e.to_string()))?,
-            constraint_name: row
-                .try_get("constraint_name")
-                .map_err(|e| DatabaseError::QueryError(e.to_string()))?,
+            constraint_name: Some(
+                row.try_get("constraint_name")
+                    .map_err(|e| DatabaseError::QueryError(e.to_string()))?,
+            ),
+            relationship_type: "foreign_key".to_string(),
+            confidence: None,
         });
     }
 
-    pool.close().await;
     Ok(relationships)
+}
+
+/// Get foreign keys from SQLite using PRAGMA
+async fn get_sqlite_foreign_keys(pool: &sqlx::AnyPool) -> Result<Vec<Relationship>, DatabaseError> {
+    // First, get all table names
+    let table_query = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'";
+    let table_rows = sqlx::query(table_query)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+    let mut relationships = Vec::new();
+
+    for table_row in table_rows {
+        let table_name: String = table_row
+            .try_get("name")
+            .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+        // Use PRAGMA to get foreign keys for this table
+        let pragma_query = format!("PRAGMA foreign_key_list('{}')", table_name);
+        let fk_rows = sqlx::query(&pragma_query)
+            .fetch_all(pool)
+            .await
+            .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+        for fk_row in fk_rows {
+            let foreign_table: String = fk_row
+                .try_get("table")
+                .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+            let column_name: String = fk_row
+                .try_get("from")
+                .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+            let foreign_column: String = fk_row
+                .try_get("to")
+                .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+            relationships.push(Relationship {
+                table_name: table_name.clone(),
+                column_name,
+                foreign_table,
+                foreign_column,
+                constraint_name: None, // SQLite PRAGMA doesn't return constraint names
+                relationship_type: "foreign_key".to_string(),
+                confidence: None,
+            });
+        }
+    }
+
+    Ok(relationships)
+}
+
+/// Infer relationships based on naming conventions and schema patterns
+async fn infer_relationships(
+    creds: &super::types::DatabaseCredentials,
+    pool: &sqlx::AnyPool,
+) -> Result<Vec<Relationship>, DatabaseError> {
+    use std::collections::HashMap;
+
+    // Get all tables and their columns with types
+    let schemas = get_all_table_schemas(creds, pool).await?;
+
+    // Build a map of potential primary keys: table_name -> [(column_name, data_type)]
+    let mut primary_keys: HashMap<String, Vec<(String, String)>> = HashMap::new();
+    let mut all_columns: HashMap<String, Vec<(String, String)>> = HashMap::new();
+
+    for schema in &schemas {
+        let table_name = &schema.table_name;
+
+        for col in &schema.columns {
+            all_columns
+                .entry(table_name.clone())
+                .or_insert_with(Vec::new)
+                .push((col.name.clone(), col.data_type.clone()));
+
+            if col.is_primary_key {
+                primary_keys
+                    .entry(table_name.clone())
+                    .or_insert_with(Vec::new)
+                    .push((col.name.clone(), col.data_type.clone()));
+            }
+        }
+    }
+
+    let mut inferred = Vec::new();
+
+    // Pattern matching for common foreign key naming conventions
+    for schema in &schemas {
+        for col in &schema.columns {
+            // Skip if it's a primary key (don't want self-references)
+            if col.is_primary_key {
+                continue;
+            }
+
+            let col_name = col.name.to_lowercase();
+            let col_type = &col.data_type;
+
+            // Pattern 1: column ends with "_id" (e.g., user_id, order_id, product_id)
+            if col_name.ends_with("_id") {
+                let potential_table = col_name.trim_end_matches("_id");
+
+                // Try both singular and plural forms
+                let potential_tables = vec![
+                    potential_table.to_string(),
+                    format!("{}s", potential_table),  // users, orders
+                    format!("{}es", potential_table), // addresses
+                ];
+
+                for target_table in potential_tables {
+                    if let Some(pk_columns) = primary_keys.get(&target_table) {
+                        // Check if there's a matching primary key with compatible type
+                        for (pk_col, pk_type) in pk_columns {
+                            if are_types_compatible(col_type, pk_type) {
+                                inferred.push(Relationship {
+                                    table_name: schema.table_name.clone(),
+                                    column_name: col.name.clone(),
+                                    foreign_table: target_table.clone(),
+                                    foreign_column: pk_col.clone(),
+                                    constraint_name: None,
+                                    relationship_type: "inferred".to_string(),
+                                    confidence: Some("high".to_string()),
+                                });
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Pattern 2: column name matches table_name + "id" or "id" (e.g., userid, orderid)
+            // This handles cases without underscores
+            if col_name.ends_with("id") && col_name != "id" {
+                let potential_table = col_name.trim_end_matches("id");
+
+                let potential_tables = vec![
+                    potential_table.to_string(),
+                    format!("{}s", potential_table),
+                ];
+
+                for target_table in potential_tables {
+                    if let Some(pk_columns) = primary_keys.get(&target_table) {
+                        for (pk_col, pk_type) in pk_columns {
+                            if are_types_compatible(col_type, pk_type) {
+                                inferred.push(Relationship {
+                                    table_name: schema.table_name.clone(),
+                                    column_name: col.name.clone(),
+                                    foreign_table: target_table.clone(),
+                                    foreign_column: pk_col.clone(),
+                                    constraint_name: None,
+                                    relationship_type: "inferred".to_string(),
+                                    confidence: Some("medium".to_string()),
+                                });
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Pattern 3: exact table name match (e.g., column "user" referencing table "users.id")
+            for (target_table, pk_columns) in &primary_keys {
+                let table_singular = target_table.trim_end_matches('s');
+
+                if col_name == target_table.to_lowercase() || col_name == table_singular.to_lowercase() {
+                    for (pk_col, pk_type) in pk_columns {
+                        if are_types_compatible(col_type, pk_type) {
+                            inferred.push(Relationship {
+                                table_name: schema.table_name.clone(),
+                                column_name: col.name.clone(),
+                                foreign_table: target_table.clone(),
+                                foreign_column: pk_col.clone(),
+                                constraint_name: None,
+                                relationship_type: "inferred".to_string(),
+                                confidence: Some("low".to_string()),
+                            });
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(inferred)
+}
+
+/// Get schemas for all tables in the database
+async fn get_all_table_schemas(
+    creds: &super::types::DatabaseCredentials,
+    pool: &sqlx::AnyPool,
+) -> Result<Vec<TableSchema>, DatabaseError> {
+    // Get all table names first
+    let tables_query = match creds.db_type {
+        DatabaseType::Postgres => {
+            "SELECT table_name::text FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema')"
+        }
+        DatabaseType::MySQL => {
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()"
+        }
+        DatabaseType::SQLite => {
+            "SELECT name as table_name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        }
+    };
+
+    let table_rows = sqlx::query(tables_query)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+    let mut table_names: Vec<String> = Vec::new();
+    for row in table_rows {
+        let table_name: String = row
+            .try_get("table_name")
+            .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+        table_names.push(table_name);
+    }
+
+    // Now get schema for each table
+    let mut schemas = Vec::new();
+
+    for table_name in table_names {
+        let schema = match creds.db_type {
+            DatabaseType::SQLite => {
+                // Use PRAGMA for SQLite
+                let query = format!("PRAGMA table_info('{}')", table_name);
+                let rows = sqlx::query(&query)
+                    .fetch_all(pool)
+                    .await
+                    .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+                let mut columns = Vec::new();
+                for row in rows {
+                    columns.push(ColumnInfo {
+                        name: row
+                            .try_get("name")
+                            .map_err(|e| DatabaseError::QueryError(e.to_string()))?,
+                        data_type: row
+                            .try_get("type")
+                            .map_err(|e| DatabaseError::QueryError(e.to_string()))?,
+                        is_nullable: row.try_get::<i32, _>("notnull").unwrap_or(0) == 0,
+                        is_primary_key: row.try_get::<i32, _>("pk").unwrap_or(0) > 0,
+                        default_value: row.try_get("dflt_value").ok(),
+                    });
+                }
+
+                TableSchema {
+                    table_name: table_name.clone(),
+                    schema: None,
+                    columns,
+                }
+            }
+            DatabaseType::Postgres => {
+                // Use information_schema for Postgres
+                let query = format!(
+                    "SELECT
+                        c.column_name::text,
+                        c.data_type::text,
+                        c.is_nullable::text,
+                        c.column_default::text,
+                        CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_primary_key
+                    FROM information_schema.columns c
+                    LEFT JOIN (
+                        SELECT ku.column_name::text
+                        FROM information_schema.table_constraints tc
+                        JOIN information_schema.key_column_usage ku
+                            ON tc.constraint_name = ku.constraint_name
+                            AND tc.table_schema = ku.table_schema
+                        WHERE tc.constraint_type = 'PRIMARY KEY'
+                            AND tc.table_name = '{}'
+                    ) pk ON c.column_name = pk.column_name
+                    WHERE c.table_name = '{}'
+                    ORDER BY c.ordinal_position",
+                    table_name, table_name
+                );
+
+                let rows = sqlx::query(&query)
+                    .fetch_all(pool)
+                    .await
+                    .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+                let mut columns = Vec::new();
+                for row in rows {
+                    let is_nullable: String = row
+                        .try_get("is_nullable")
+                        .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+                    columns.push(ColumnInfo {
+                        name: row
+                            .try_get("column_name")
+                            .map_err(|e| DatabaseError::QueryError(e.to_string()))?,
+                        data_type: row
+                            .try_get("data_type")
+                            .map_err(|e| DatabaseError::QueryError(e.to_string()))?,
+                        is_nullable: is_nullable.to_uppercase() == "YES",
+                        is_primary_key: row.try_get("is_primary_key").unwrap_or(false),
+                        default_value: row.try_get("column_default").ok(),
+                    });
+                }
+
+                TableSchema {
+                    table_name: table_name.clone(),
+                    schema: Some("public".to_string()),
+                    columns,
+                }
+            }
+            DatabaseType::MySQL => {
+                // Use information_schema for MySQL
+                let query = format!(
+                    "SELECT
+                        column_name,
+                        data_type,
+                        is_nullable,
+                        column_default,
+                        CASE WHEN column_key = 'PRI' THEN 1 ELSE 0 END as is_primary_key
+                    FROM information_schema.columns
+                    WHERE table_name = '{}' AND table_schema = DATABASE()
+                    ORDER BY ordinal_position",
+                    table_name
+                );
+
+                let rows = sqlx::query(&query)
+                    .fetch_all(pool)
+                    .await
+                    .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+
+                let mut columns = Vec::new();
+                for row in rows {
+                    let is_nullable: String = row
+                        .try_get("is_nullable")
+                        .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+                    let is_pk: i32 = row.try_get("is_primary_key").unwrap_or(0);
+
+                    columns.push(ColumnInfo {
+                        name: row
+                            .try_get("column_name")
+                            .map_err(|e| DatabaseError::QueryError(e.to_string()))?,
+                        data_type: row
+                            .try_get("data_type")
+                            .map_err(|e| DatabaseError::QueryError(e.to_string()))?,
+                        is_nullable: is_nullable.to_uppercase() == "YES",
+                        is_primary_key: is_pk > 0,
+                        default_value: row.try_get("column_default").ok(),
+                    });
+                }
+
+                TableSchema {
+                    table_name: table_name.clone(),
+                    schema: None,
+                    columns,
+                }
+            }
+        };
+
+        schemas.push(schema);
+    }
+
+    Ok(schemas)
+}
+
+/// Check if two data types are compatible for foreign key relationships
+fn are_types_compatible(type1: &str, type2: &str) -> bool {
+    let t1 = normalize_type(type1);
+    let t2 = normalize_type(type2);
+
+    // Exact match
+    if t1 == t2 {
+        return true;
+    }
+
+    // Integer types are compatible with each other
+    let int_types = ["int", "integer", "bigint", "smallint", "tinyint", "serial", "bigserial"];
+    if int_types.contains(&t1.as_str()) && int_types.contains(&t2.as_str()) {
+        return true;
+    }
+
+    // String types are compatible
+    let string_types = ["varchar", "char", "text", "string"];
+    if string_types.contains(&t1.as_str()) && string_types.contains(&t2.as_str()) {
+        return true;
+    }
+
+    // UUID types
+    if t1 == "uuid" && t2 == "uuid" {
+        return true;
+    }
+
+    false
+}
+
+/// Normalize type names for comparison
+fn normalize_type(data_type: &str) -> String {
+    let lower = data_type.to_lowercase();
+
+    // Remove size specifications like VARCHAR(255) -> varchar
+    if let Some(idx) = lower.find('(') {
+        lower[..idx].to_string()
+    } else {
+        lower
+    }
 }
 
 // Tauri commands for metadata

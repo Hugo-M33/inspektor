@@ -66,7 +66,10 @@ pub struct Relationship {
     pub column_name: String,
     pub foreign_table: String,
     pub foreign_column: String,
-    pub constraint_name: String,
+    pub constraint_name: Option<String>, // None for inferred relationships
+    pub relationship_type: String, // "foreign_key" | "inferred" | "learned"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<String>, // Optional confidence level for inferred relationships
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -338,13 +338,23 @@ class SessionManager:
         expires_at = datetime.utcnow() + timedelta(hours=self.metadata_ttl_hours)
 
         if existing:
-            # Update existing metadata
-            existing.data = data
+            # For schema metadata, merge with existing data to build cumulative knowledge
+            # This prevents losing previously cached table schemas when new ones are requested
+            if metadata_type == "schema":
+                # Merge new schema data with existing
+                # Both existing.data and data should be dicts like: { "users": [...], "posts": [...], "db_type": "postgres" }
+                merged_data = {**existing.data, **data}
+                existing.data = merged_data
+                logger.info(f"Merged schema metadata cache for {database_id}: added {list(data.keys())}")
+            else:
+                # For other metadata types (tables, relationships), replace entirely
+                existing.data = data
+                logger.info(f"Replaced metadata cache: {metadata_type} for {database_id}")
+
             existing.updated_at = datetime.utcnow()
             existing.expires_at = expires_at
             db.commit()
             db.refresh(existing)
-            logger.info(f"Updated metadata cache: {metadata_type} for {database_id}")
             return existing
         else:
             # Create new metadata

@@ -73,6 +73,7 @@ export interface QueryResponse {
   sql_response?: SQLResponse;
   message?: string;
   error?: string;
+  failed_sql?: string;  // SQL that caused an error, if any
 }
 
 export interface ConversationMessage {
