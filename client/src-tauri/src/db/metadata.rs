@@ -30,14 +30,18 @@ pub async fn get_tables(
 
     let mut tables = Vec::new();
     for row in rows {
+        // MySQL returns uppercase column names, try both cases
         let table_name: String = row
             .try_get("table_name")
+            .or_else(|_| row.try_get("TABLE_NAME"))
             .map_err(|e| DatabaseError::QueryError(format!("{}\n\nSQL Query:\n{}", e, query)))?;
 
         let schema: Option<String> = if matches!(creds.db_type, DatabaseType::SQLite) {
             None
         } else {
-            row.try_get("table_schema").ok()
+            row.try_get("table_schema")
+                .or_else(|_| row.try_get("TABLE_SCHEMA"))
+                .ok()
         };
 
         tables.push(TableInfo {
@@ -170,25 +174,34 @@ pub async fn get_table_schema(
         let mut tables_map: HashMap<String, Vec<ColumnInfo>> = HashMap::new();
 
         for row in rows {
+            // MySQL returns uppercase column names, try both cases
             let table_name: String = row
                 .try_get("table_name")
+                .or_else(|_| row.try_get("TABLE_NAME"))
                 .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
             let col_name: String = row
                 .try_get("column_name")
+                .or_else(|_| row.try_get("COLUMN_NAME"))
                 .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
             let data_type: String = row
                 .try_get("data_type")
+                .or_else(|_| row.try_get("DATA_TYPE"))
                 .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
 
             let is_nullable_str: String = row
                 .try_get("is_nullable")
+                .or_else(|_| row.try_get("IS_NULLABLE"))
                 .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
             let is_nullable = is_nullable_str.to_uppercase() == "YES";
 
-            let default_val: Option<String> = row.try_get("column_default").ok();
+            let default_val: Option<String> = row.try_get("column_default")
+                .or_else(|_| row.try_get("COLUMN_DEFAULT"))
+                .ok();
 
             let is_pk = if matches!(creds.db_type, DatabaseType::MySQL) {
-                let pk_val: i32 = row.try_get("is_primary_key").unwrap_or(0);
+                let pk_val: i32 = row.try_get("is_primary_key")
+                    .or_else(|_| row.try_get("IS_PRIMARY_KEY"))
+                    .unwrap_or(0);
                 pk_val > 0
             } else {
                 let pk_val: bool = row.try_get("is_primary_key").unwrap_or(false);
@@ -295,21 +308,27 @@ async fn get_explicit_relationships(
 
     let mut relationships = Vec::new();
     for row in rows {
+        // MySQL returns uppercase column names, try both cases
         relationships.push(Relationship {
             table_name: row
                 .try_get("table_name")
+                .or_else(|_| row.try_get("TABLE_NAME"))
                 .map_err(|e| DatabaseError::QueryError(e.to_string()))?,
             column_name: row
                 .try_get("column_name")
+                .or_else(|_| row.try_get("COLUMN_NAME"))
                 .map_err(|e| DatabaseError::QueryError(e.to_string()))?,
             foreign_table: row
                 .try_get("foreign_table")
+                .or_else(|_| row.try_get("FOREIGN_TABLE"))
                 .map_err(|e| DatabaseError::QueryError(e.to_string()))?,
             foreign_column: row
                 .try_get("foreign_column")
+                .or_else(|_| row.try_get("FOREIGN_COLUMN"))
                 .map_err(|e| DatabaseError::QueryError(e.to_string()))?,
             constraint_name: Some(
                 row.try_get("constraint_name")
+                    .or_else(|_| row.try_get("CONSTRAINT_NAME"))
                     .map_err(|e| DatabaseError::QueryError(e.to_string()))?,
             ),
             relationship_type: "foreign_key".to_string(),
@@ -528,8 +547,10 @@ async fn get_all_table_schemas(
 
     let mut table_names: Vec<String> = Vec::new();
     for row in table_rows {
+        // MySQL returns uppercase column names, try both cases
         let table_name: String = row
             .try_get("table_name")
+            .or_else(|_| row.try_get("TABLE_NAME"))
             .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
         table_names.push(table_name);
     }
@@ -645,21 +666,29 @@ async fn get_all_table_schemas(
 
                 let mut columns = Vec::new();
                 for row in rows {
+                    // MySQL returns uppercase column names, try both cases
                     let is_nullable: String = row
                         .try_get("is_nullable")
+                        .or_else(|_| row.try_get("IS_NULLABLE"))
                         .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
-                    let is_pk: i32 = row.try_get("is_primary_key").unwrap_or(0);
+                    let is_pk: i32 = row.try_get("is_primary_key")
+                        .or_else(|_| row.try_get("IS_PRIMARY_KEY"))
+                        .unwrap_or(0);
 
                     columns.push(ColumnInfo {
                         name: row
                             .try_get("column_name")
+                            .or_else(|_| row.try_get("COLUMN_NAME"))
                             .map_err(|e| DatabaseError::QueryError(e.to_string()))?,
                         data_type: row
                             .try_get("data_type")
+                            .or_else(|_| row.try_get("DATA_TYPE"))
                             .map_err(|e| DatabaseError::QueryError(e.to_string()))?,
                         is_nullable: is_nullable.to_uppercase() == "YES",
                         is_primary_key: is_pk > 0,
-                        default_value: row.try_get("column_default").ok(),
+                        default_value: row.try_get("column_default")
+                            .or_else(|_| row.try_get("COLUMN_DEFAULT"))
+                            .ok(),
                     });
                 }
 
