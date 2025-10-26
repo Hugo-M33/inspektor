@@ -148,10 +148,10 @@ pub async fn get_table_schema(
             DatabaseType::MySQL => {
                 format!(
                     "SELECT
-                        table_name,
-                        column_name,
-                        data_type,
-                        is_nullable,
+                        CAST(table_name AS CHAR) AS table_name,
+                        CAST(column_name AS CHAR) AS column_name,
+                        CAST(data_type AS CHAR) AS data_type,
+                        CAST(is_nullable AS CHAR) AS is_nullable,
                         column_default,
                         CASE WHEN column_key = 'PRI' THEN 1 ELSE 0 END as is_primary_key
                     FROM information_schema.columns
@@ -647,9 +647,9 @@ async fn get_all_table_schemas(
                 // Use information_schema for MySQL
                 let query = format!(
                     "SELECT
-                        column_name,
-                        data_type,
-                        is_nullable,
+                        CAST(column_name AS CHAR) AS column_name,
+                        CAST(data_type AS CHAR) AS data_type,
+                        CAST(is_nullable AS CHAR) AS is_nullable,
                         column_default,
                         CASE WHEN column_key = 'PRI' THEN 1 ELSE 0 END as is_primary_key
                     FROM information_schema.columns
