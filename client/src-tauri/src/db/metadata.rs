@@ -169,17 +169,37 @@ pub async fn get_table_schema(
             .await
             .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
 
-        // Debug: Capture actual column names from the query result
-        let debug_columns = if !rows.is_empty() {
-            let first_row = &rows[0];
-            let column_names: Vec<String> = first_row
+        // Build a helper function to get column value by trying different case variations
+        let get_column_value = |row: &sqlx::any::AnyRow, base_name: &str| -> Result<String, DatabaseError> {
+            // Get all available column names for debugging
+            let available_columns: Vec<String> = row
                 .columns()
                 .iter()
                 .map(|col| col.name().to_string())
                 .collect();
-            format!("Available columns: {}", column_names.join(", "))
-        } else {
-            "No rows returned".to_string()
+
+            // Try different case variations
+            let variations = vec![
+                base_name.to_lowercase(),
+                base_name.to_uppercase(),
+                base_name.to_string(), // original case
+            ];
+
+            for variation in &variations {
+                if let Ok(value) = row.try_get::<String, _>(variation.as_str()) {
+                    return Ok(value);
+                }
+            }
+
+            // If all variations fail, return a detailed error
+            Err(DatabaseError::QueryError(
+                format!(
+                    "Column '{}' not found. Available columns: {}\n\nSQL Query:\n{}",
+                    base_name,
+                    available_columns.join(", "),
+                    query
+                )
+            ))
         };
 
         // Group columns by table name
@@ -187,32 +207,10 @@ pub async fn get_table_schema(
         let mut tables_map: HashMap<String, Vec<ColumnInfo>> = HashMap::new();
 
         for row in rows {
-            // MySQL returns uppercase column names, try both cases
-            let table_name: String = row
-                .try_get("table_name")
-                .or_else(|_| row.try_get("TABLE_NAME"))
-                .map_err(|e| DatabaseError::QueryError(
-                    format!("{}\n\nSQL Query:\n{}\n\nDebug Info:\n{}", e, query, debug_columns)
-                ))?;
-            let col_name: String = row
-                .try_get("column_name")
-                .or_else(|_| row.try_get("COLUMN_NAME"))
-                .map_err(|e| DatabaseError::QueryError(
-                    format!("{}\n\nSQL Query:\n{}\n\nDebug Info:\n{}", e, query, debug_columns)
-                ))?;
-            let data_type: String = row
-                .try_get("data_type")
-                .or_else(|_| row.try_get("DATA_TYPE"))
-                .map_err(|e| DatabaseError::QueryError(
-                    format!("{}\n\nSQL Query:\n{}\n\nDebug Info:\n{}", e, query, debug_columns)
-                ))?;
-
-            let is_nullable_str: String = row
-                .try_get("is_nullable")
-                .or_else(|_| row.try_get("IS_NULLABLE"))
-                .map_err(|e| DatabaseError::QueryError(
-                    format!("{}\n\nSQL Query:\n{}\n\nDebug Info:\n{}", e, query, debug_columns)
-                ))?;
+            let table_name = get_column_value(&row, "table_name")?;
+            let col_name = get_column_value(&row, "column_name")?;
+            let data_type = get_column_value(&row, "data_type")?;
+            let is_nullable_str = get_column_value(&row, "is_nullable")?;
             let is_nullable = is_nullable_str.to_uppercase() == "YES";
 
             let default_val: Option<String> = row.try_get("column_default")
