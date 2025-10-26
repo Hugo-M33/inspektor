@@ -255,9 +255,17 @@ export function MetadataApproval({
                               <div className="mt-2">
                                 <p className="text-xs font-medium text-red-400 mb-1">SQL Query:</p>
                                 <pre className="text-xs text-red-300 bg-dark-secondary p-2 rounded overflow-x-auto">
-                                  {error.split('SQL Query:\n')[1]}
+                                  {error.split('SQL Query:\n')[1]?.split('\n\nDebug Info:')[0]}
                                 </pre>
                               </div>
+                              {error.includes('Debug Info:') && (
+                                <div className="mt-2">
+                                  <p className="text-xs font-medium text-red-400 mb-1">Debug Info:</p>
+                                  <pre className="text-xs text-red-300 bg-dark-secondary p-2 rounded overflow-x-auto">
+                                    {error.split('Debug Info:\n')[1]}
+                                  </pre>
+                                </div>
+                              )}
                             </div>
                           ) : (
                             <p className="text-xs text-red-400 mt-1">{error}</p>
