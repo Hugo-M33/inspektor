@@ -148,12 +148,12 @@ pub async fn get_table_schema(
             DatabaseType::MySQL => {
                 format!(
                     "SELECT
-                        CAST(table_name AS CHAR) AS table_name,
-                        CAST(column_name AS CHAR) AS column_name,
-                        CAST(data_type AS CHAR) AS data_type,
-                        CAST(is_nullable AS CHAR) AS is_nullable,
-                        column_default,
-                        CASE WHEN column_key = 'PRI' THEN 1 ELSE 0 END as is_primary_key
+                        CAST(table_name AS CHAR) AS `table_name`,
+                        CAST(column_name AS CHAR) AS `column_name`,
+                        CAST(data_type AS CHAR) AS `data_type`,
+                        CAST(is_nullable AS CHAR) AS `is_nullable`,
+                        CAST(column_default AS CHAR) as `column_default`,
+                        CASE WHEN column_key = 'PRI' THEN 1 ELSE 0 END as `is_primary_key`
                     FROM information_schema.columns
                     WHERE table_name IN {} AND table_schema = '{}'
                     ORDER BY table_name, ordinal_position",
