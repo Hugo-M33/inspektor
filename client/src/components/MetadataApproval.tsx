@@ -247,10 +247,21 @@ export function MetadataApproval({
                     {error && (
                       <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
                         <XCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-                        <div>
+                        <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-red-500">Error</p>
-                          <p className="text-xs text-red-400 mt-1">{error}</p>
-
+                          {error.includes('SQL Query:') ? (
+                            <div className="mt-2 space-y-2">
+                              <p className="text-xs text-red-400">{error.split('\n\nSQL Query:')[0]}</p>
+                              <div className="mt-2">
+                                <p className="text-xs font-medium text-red-400 mb-1">SQL Query:</p>
+                                <pre className="text-xs text-red-300 bg-dark-secondary p-2 rounded overflow-x-auto">
+                                  {error.split('SQL Query:\n')[1]}
+                                </pre>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-red-400 mt-1">{error}</p>
+                          )}
                         </div>
                       </div>
                     )}

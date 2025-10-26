@@ -26,13 +26,13 @@ pub async fn get_tables(
     let rows = sqlx::query(&query)
         .fetch_all(&pool)
         .await
-        .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+        .map_err(|e| DatabaseError::QueryError(format!("{}\n\nSQL Query:\n{}", e, query)))?;
 
     let mut tables = Vec::new();
     for row in rows {
         let table_name: String = row
             .try_get("table_name")
-            .map_err(|e| DatabaseError::QueryError(e.to_string()))?;
+            .map_err(|e| DatabaseError::QueryError(format!("{}\n\nSQL Query:\n{}", e, query)))?;
 
         let schema: Option<String> = if matches!(creds.db_type, DatabaseType::SQLite) {
             None
